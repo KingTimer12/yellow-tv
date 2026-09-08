@@ -1,0 +1,378 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #17140d;
+  --color-ink-deep: #0e0c07;
+  --color-panel: #221d12;
+  --color-panel-hi: #2b2416;
+  --color-edge: #3a3120;
+  --color-amber: #ffd11a;
+  --color-amber-deep: #b8870b;
+  --color-paper: #f5efdd;
+  --color-live: #ff5b3a;
+
+  --font-display: "Bricolage Grotesque", "Trebuchet MS", sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Motion tokens — one rhythm for the whole app. */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-soft: cubic-bezier(0.55, 0, 0.85, 0.35);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 140ms;
+  --duration-base: 220ms;
+  --duration-slow: 340ms;
+
+  --shadow-lift: 0 10px 30px -12px rgb(0 0 0 / 0.75);
+  --shadow-glow: 0 0 0 1px rgb(255 209 26 / 0.55), 0 12px 34px -14px rgb(255 209 26 / 0.35);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Faint horizontal scanlines: the tuner texture behind the whole app. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgb(255 255 255 / 0.017) 0px,
+    rgb(255 255 255 / 0.017) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+}
+
+/* CRT vignette: corners fall off like a tube screen. Purely atmospheric. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: radial-gradient(
+    ellipse 120% 90% at 50% 45%,
+    transparent 55%,
+    rgb(0 0 0 / 0.28) 100%
+  );
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-amber);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--color-amber);
+  color: var(--color-ink);
+}
+
+/* Scrollbars inside the tuner panels */
+* {
+  scrollbar-color: var(--color-edge) transparent;
+  scrollbar-width: thin;
+}
+
+button,
+[role="tab"],
+a[href] {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* ---------- Keyframes ---------- */
+
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes poster-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The tuner sweep: a thin amber line crossing while a stream negotiates. */
+@keyframes tuner-sweep {
+  0% {
+    transform: translate3d(0, -100%, 0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(0, 900%, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    transform: translate3d(-100%, 0, 0);
+  }
+  to {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgb(255 91 58 / 0.55);
+  }
+  70% {
+    opacity: 0.85;
+    box-shadow: 0 0 0 6px rgb(255 91 58 / 0);
+  }
+}
+
+@keyframes star-pop {
+  0% {
+    transform: scale(0.6) rotate(-18deg);
+  }
+  60% {
+    transform: scale(1.18) rotate(4deg);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes signal-drift {
+  0% {
+    transform: scale(1.06) translate3d(0, 0, 0);
+  }
+  100% {
+    transform: scale(1.14) translate3d(0, -1.5%, 0);
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes glitch-slip {
+  0%,
+  92%,
+  100% {
+    transform: none;
+    clip-path: none;
+  }
+  93% {
+    transform: translate3d(-3px, 0, 0);
+    clip-path: inset(18% 0 62% 0);
+  }
+  95% {
+    transform: translate3d(4px, 0, 0);
+    clip-path: inset(64% 0 12% 0);
+  }
+  97% {
+    transform: translate3d(-2px, 0, 0);
+    clip-path: inset(38% 0 44% 0);
+  }
+}
+
+/* ---------- Motion utilities ---------- */
+
+/* Entry reveals. `--i` staggers siblings (30-50ms per item). */
+.anim-reveal {
+  animation: reveal-up var(--duration-slow) var(--ease-out-soft) both;
+  animation-delay: calc(var(--i, 0) * 38ms);
+}
+
+.anim-fade {
+  animation: reveal-in var(--duration-base) var(--ease-out-soft) both;
+  animation-delay: calc(var(--i, 0) * 38ms);
+}
+
+.anim-poster {
+  animation: poster-in 420ms var(--ease-out-soft) both;
+  animation-delay: calc(var(--i, 0) * 32ms);
+}
+
+.anim-live-dot {
+  animation: live-pulse 1.8s var(--ease-out-soft) infinite;
+}
+
+.anim-star-pop {
+  animation: star-pop 320ms var(--ease-spring);
+}
+
+.anim-caret {
+  animation: caret-blink 1.1s steps(1, end) infinite;
+}
+
+.anim-glitch {
+  animation: glitch-slip 5s steps(1, end) infinite;
+}
+
+/* Slow drift on hero backdrops — reads as a living broadcast still. */
+.anim-drift {
+  animation: signal-drift 22s var(--ease-out-soft) infinite alternate;
+}
+
+/* Skeleton shimmer for loading surfaces. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--color-panel);
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(255 209 26 / 0.07) 45%,
+    rgb(255 209 26 / 0.11) 50%,
+    rgb(255 209 26 / 0.07) 55%,
+    transparent
+  );
+  animation: shimmer 1.5s linear infinite;
+}
+
+/* Amber sweep line, used by the player while tuning. */
+.tuner-sweep::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 10%;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgb(255 209 26 / 0.16) 60%,
+    rgb(255 209 26 / 0.5)
+  );
+  animation: tuner-sweep 2.4s var(--ease-out-soft) infinite;
+}
+
+/* Press feedback that never moves neighbouring layout. */
+.press {
+  transition:
+    transform var(--duration-fast) var(--ease-out-soft),
+    color var(--duration-fast) linear,
+    background-color var(--duration-fast) linear,
+    border-color var(--duration-fast) linear,
+    box-shadow var(--duration-base) var(--ease-out-soft);
+  will-change: transform;
+}
+
+.press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Left accent rail that grows in on hover/current — rows read as tuner stops. */
+.rail {
+  position: relative;
+}
+
+.rail::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 2px;
+  background: var(--color-amber);
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform var(--duration-base) var(--ease-out-soft);
+}
+
+.rail:hover::before,
+.rail:focus-within::before,
+.rail[data-current="true"]::before {
+  transform: scaleY(1);
+}
+
+/* Underline that wipes in under nav links. */
+.wipe {
+  position: relative;
+}
+
+.wipe::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 2px;
+  background: var(--color-amber);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--duration-base) var(--ease-out-soft);
+}
+
+.wipe:hover::after,
+.wipe[data-active="true"]::after {
+  transform: scaleX(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .anim-reveal,
+  .anim-fade,
+  .anim-poster {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
