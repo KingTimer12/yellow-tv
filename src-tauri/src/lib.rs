@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod db;
 pub mod ids;
+pub mod m3u;
 pub mod meta;
 mod proxy;
 
