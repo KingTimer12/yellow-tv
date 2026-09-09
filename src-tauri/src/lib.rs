@@ -7,14 +7,18 @@ pub mod m3u;
 pub mod meta;
 mod proxy;
 
+// NOTA: este arquivo ainda reflete o Catalog antigo baseado em JSON. A Task 8
+// reescreve os comandos Tauri para o novo `catalog.rs` orientado a SQLite; até
+// lá, os comandos que dependiam do Catalog antigo ficam comentados apenas para
+// manter o crate compilando.
+#[allow(unused_imports)]
 use std::path::PathBuf;
 
-use catalog::{Catalog, CatalogPage, Channel, DataStatus, ItemWithRelated, Kind, SeriesEpisodes};
 use meta::{Meta, Tmdb};
+#[allow(unused_imports)]
 use tauri::{Manager, State};
 
 struct AppState {
-    catalog: Catalog,
     tmdb: Tmdb,
     proxy_port: u16,
 }
@@ -42,45 +46,48 @@ fn resolve_data_dir(app_data: PathBuf) -> PathBuf {
     app_data.join("data")
 }
 
-#[tauri::command]
-fn data_status(state: State<'_, AppState>) -> DataStatus {
-    state.catalog.status()
-}
-
-#[tauri::command]
-fn channels(state: State<'_, AppState>) -> Result<Vec<Channel>, String> {
-    state.catalog.channels().map(|channels| (*channels).clone())
-}
-
-#[tauri::command]
-fn catalog_page(
-    state: State<'_, AppState>,
-    kind: String,
-    query: String,
-    group: Option<String>,
-    page: usize,
-) -> Result<CatalogPage, String> {
-    state.catalog.page(
-        Kind::parse(&kind)?,
-        &query,
-        group.as_deref().filter(|value| !value.is_empty()),
-        page,
-    )
-}
-
-#[tauri::command]
-fn catalog_item(
-    state: State<'_, AppState>,
-    kind: String,
-    id: String,
-) -> Result<ItemWithRelated, String> {
-    state.catalog.item(Kind::parse(&kind)?, &id)
-}
-
-#[tauri::command]
-fn series_episodes(state: State<'_, AppState>, id: String) -> Result<SeriesEpisodes, String> {
-    state.catalog.episodes(&id)
-}
+// Os comandos abaixo dependiam do `Catalog` antigo (JSON em memória), removido
+// na Task 6. A Task 8 os reescreve sobre o novo `catalog.rs` (SQLite).
+//
+// #[tauri::command]
+// fn data_status(state: State<'_, AppState>) -> DataStatus {
+//     state.catalog.status()
+// }
+//
+// #[tauri::command]
+// fn channels(state: State<'_, AppState>) -> Result<Vec<Channel>, String> {
+//     state.catalog.channels().map(|channels| (*channels).clone())
+// }
+//
+// #[tauri::command]
+// fn catalog_page(
+//     state: State<'_, AppState>,
+//     kind: String,
+//     query: String,
+//     group: Option<String>,
+//     page: usize,
+// ) -> Result<CatalogPage, String> {
+//     state.catalog.page(
+//         Kind::parse(&kind)?,
+//         &query,
+//         group.as_deref().filter(|value| !value.is_empty()),
+//         page,
+//     )
+// }
+//
+// #[tauri::command]
+// fn catalog_item(
+//     state: State<'_, AppState>,
+//     kind: String,
+//     id: String,
+// ) -> Result<ItemWithRelated, String> {
+//     state.catalog.item(Kind::parse(&kind)?, &id)
+// }
+//
+// #[tauri::command]
+// fn series_episodes(state: State<'_, AppState>, id: String) -> Result<SeriesEpisodes, String> {
+//     state.catalog.episodes(&id)
+// }
 
 #[tauri::command]
 async fn title_meta(
@@ -128,21 +135,12 @@ pub fn run() {
             println!("YellowTV: proxy de stream em 127.0.0.1:{proxy_port}");
 
             app.manage(AppState {
-                catalog: Catalog::new(data_dir),
                 tmdb: Tmdb::new(app_data.join("tmdb-cache")),
                 proxy_port,
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            data_status,
-            channels,
-            catalog_page,
-            catalog_item,
-            series_episodes,
-            title_meta,
-            stream_url
-        ])
+        .invoke_handler(tauri::generate_handler![title_meta, stream_url])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
