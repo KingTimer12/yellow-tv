@@ -2,6 +2,7 @@ pub mod catalog;
 pub mod db;
 pub mod ids;
 pub mod import;
+pub mod library;
 pub mod m3u;
 pub mod meta;
 mod proxy;
