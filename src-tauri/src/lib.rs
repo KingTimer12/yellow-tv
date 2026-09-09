@@ -6,6 +6,7 @@ pub mod library;
 pub mod m3u;
 pub mod meta;
 mod proxy;
+pub mod settings;
 
 // NOTA: este arquivo ainda reflete o Catalog antigo baseado em JSON. A Task 8
 // reescreve os comandos Tauri para o novo `catalog.rs` orientado a SQLite; até
@@ -96,7 +97,8 @@ async fn title_meta(
     title: String,
     year: Option<i64>,
 ) -> Result<Meta, String> {
-    Ok(state.tmdb.meta(&kind, &title, year).await)
+    let key = std::env::var("TMDB_API_KEY").ok();
+    Ok(state.tmdb.fetch(key, &kind, &title, year).await)
 }
 
 /// Toda reprodução passa pelo proxy local: é o que permite tocar HTTP puro dentro
@@ -135,7 +137,7 @@ pub fn run() {
             println!("YellowTV: proxy de stream em 127.0.0.1:{proxy_port}");
 
             app.manage(AppState {
-                tmdb: Tmdb::new(app_data.join("tmdb-cache")),
+                tmdb: Tmdb::new(),
                 proxy_port,
             });
             Ok(())

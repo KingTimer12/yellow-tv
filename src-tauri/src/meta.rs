@@ -4,11 +4,12 @@
 //! pôsteres das listas já estão hospedados. Cada resposta é gravada em disco porque
 //! a busca é por título e a chave gratuita tem limite de taxa.
 
-use std::path::PathBuf;
-
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
+
+use crate::db;
+use crate::ids;
 
 const IMAGE_BASE: &str = "https://image.tmdb.org/t/p";
 
@@ -39,7 +40,7 @@ pub struct Meta {
 }
 
 impl Meta {
-    fn empty(reason: Option<String>) -> Self {
+    pub fn empty(reason: Option<String>) -> Self {
         Self {
             source: "none".into(),
             reason,
@@ -79,24 +80,16 @@ fn clean_title(title: &str) -> String {
 
 pub struct Tmdb {
     client: reqwest::Client,
-    cache_dir: PathBuf,
 }
 
 impl Tmdb {
-    pub fn new(cache_dir: PathBuf) -> Self {
+    pub fn new() -> Self {
         Self {
             client: reqwest::Client::builder()
                 .user_agent("YellowTV/0.1")
                 .build()
                 .expect("cliente HTTP"),
-            cache_dir,
         }
-    }
-
-    fn key() -> Option<String> {
-        std::env::var("TMDB_API_KEY")
-            .ok()
-            .filter(|key| !key.trim().is_empty())
     }
 
     async fn get(&self, path: &str, key: &str, params: &[(&str, &str)]) -> Result<Value, String> {
@@ -126,12 +119,7 @@ impl Tmdb {
             .map_err(|error| format!("resposta do TMDB ilegível: {error}"))
     }
 
-    async fn lookup(&self, title: &str, kind: &str, year: Option<i64>) -> Result<Meta, String> {
-        let key = match Self::key() {
-            Some(key) => key,
-            None => return Ok(Meta::empty(Some("TMDB_API_KEY não configurada".into()))),
-        };
-
+    async fn lookup(&self, key: &str, title: &str, kind: &str, year: Option<i64>) -> Result<Meta, String> {
         let query = clean_title(title);
         let year_text = year.map(|value| value.to_string());
         let mut params: Vec<(&str, &str)> = vec![("query", &query), ("include_adult", "true")];
@@ -146,7 +134,7 @@ impl Tmdb {
             ));
         }
 
-        let search = self.get(&format!("/search/{kind}"), &key, &params).await?;
+        let search = self.get(&format!("/search/{kind}"), key, &params).await?;
         let Some(hit) = search["results"].get(0) else {
             return Ok(Meta::empty(None));
         };
@@ -155,7 +143,7 @@ impl Tmdb {
         let details = self
             .get(
                 &format!("/{kind}/{id}"),
-                &key,
+                key,
                 &[("append_to_response", "credits,external_ids")],
             )
             .await?;
@@ -209,30 +197,45 @@ impl Tmdb {
         })
     }
 
-    pub async fn meta(&self, kind: &str, title: &str, year: Option<i64>) -> Meta {
+    /// Busca no TMDB. O cache e a chave ficam com o chamador porque `Connection`
+    /// não cruza `await`.
+    pub async fn fetch(&self, key: Option<String>, kind: &str, title: &str, year: Option<i64>) -> Meta {
         let kind = if kind == "series" { "tv" } else { "movie" };
-        let fingerprint = hex::encode(
-            Sha256::digest(format!("{kind}:{title}:{}", year.unwrap_or_default()).as_bytes()),
-        );
-        let cache_file = self.cache_dir.join(format!("{fingerprint}.json"));
-
-        if let Ok(bytes) = std::fs::read(&cache_file) {
-            if let Ok(cached) = serde_json::from_slice::<Meta>(&bytes) {
-                return cached;
-            }
-        }
-
-        match self.lookup(title, kind, year).await {
-            Ok(meta) => {
-                if meta.source == "tmdb" {
-                    let _ = std::fs::create_dir_all(&self.cache_dir);
-                    if let Ok(encoded) = serde_json::to_vec(&meta) {
-                        let _ = std::fs::write(&cache_file, encoded);
-                    }
-                }
-                meta
-            }
+        let Some(key) = key else {
+            return Meta::empty(Some("chave do TMDB não configurada".into()));
+        };
+        match self.lookup(&key, title, kind, year).await {
+            Ok(meta) => meta,
             Err(reason) => Meta::empty(Some(reason)),
         }
     }
+}
+
+/// Chave do cache: mesma normalização do catálogo, para que "Duna 4K" e "duna"
+/// compartilhem a mesma ficha.
+pub fn cache_id(kind: &str, title: &str, year: Option<i64>) -> String {
+    ids::item_id(kind, &ids::normalize(title), year)
+}
+
+pub fn cached(conn: &Connection, cache_id: &str) -> Option<Meta> {
+    let payload: Option<String> = conn
+        .query_row("SELECT payload FROM meta WHERE item_id = ?1", [cache_id], |row| {
+            row.get(0)
+        })
+        .optional()
+        .ok()
+        .flatten();
+    payload.and_then(|text| serde_json::from_str(&text).ok())
+}
+
+pub fn store(conn: &Connection, cache_id: &str, meta: &Meta) -> Result<(), String> {
+    let payload = serde_json::to_string(meta)
+        .map_err(|error| format!("não foi possível serializar a ficha: {error}"))?;
+    conn.execute(
+        "INSERT INTO meta(item_id, payload, fetched_at) VALUES(?1, ?2, ?3)
+         ON CONFLICT(item_id) DO UPDATE SET payload = excluded.payload, fetched_at = excluded.fetched_at",
+        params![cache_id, payload, db::now()],
+    )
+    .map_err(|error| format!("não foi possível gravar a ficha: {error}"))?;
+    Ok(())
 }
