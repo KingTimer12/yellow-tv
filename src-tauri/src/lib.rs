@@ -8,88 +8,231 @@ pub mod meta;
 mod proxy;
 pub mod settings;
 
-// NOTA: este arquivo ainda reflete o Catalog antigo baseado em JSON. A Task 8
-// reescreve os comandos Tauri para o novo `catalog.rs` orientado a SQLite; até
-// lá, os comandos que dependiam do Catalog antigo ficam comentados apenas para
-// manter o crate compilando.
-#[allow(unused_imports)]
-use std::path::PathBuf;
+use std::io::BufReader;
+use std::sync::Mutex;
 
+use catalog::{CatalogItem, CatalogPage, ItemWithRelated, Kind, Row, SeriesEpisodes};
+use import::{ImportReport, Source};
+use library::{ContinueEntry, EpisodeRef, Progress};
 use meta::{Meta, Tmdb};
-#[allow(unused_imports)]
-use tauri::{Manager, State};
+use rusqlite::Connection;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AppState {
+    conn: Mutex<Connection>,
     tmdb: Tmdb,
     proxy_port: u16,
 }
 
-/// Onde as listas geradas por `scripts/` são procuradas, em ordem: a variável de
-/// ambiente, a pasta de dados do app e `data/` na raiz do projeto (o `tauri dev`
-/// roda com o diretório atual em `src-tauri`, daí o `../data`).
-fn resolve_data_dir(app_data: PathBuf) -> PathBuf {
-    if let Some(configured) = std::env::var_os("YELLOWTV_DATA_DIR") {
-        return PathBuf::from(configured);
+impl AppState {
+    /// Todo comando síncrono passa por aqui: um único ponto que traduz um mutex
+    /// envenenado em erro apresentável.
+    fn conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
+        self.conn
+            .lock()
+            .map_err(|_| "o banco ficou em estado inconsistente; reinicie o app".to_owned())
     }
-
-    let candidates = [
-        app_data.join("data"),
-        PathBuf::from("data"),
-        PathBuf::from("../data"),
-    ];
-
-    for candidate in &candidates {
-        if candidate.join("lista_pro.json").is_file() {
-            return candidate.clone();
-        }
-    }
-
-    app_data.join("data")
 }
 
-// Os comandos abaixo dependiam do `Catalog` antigo (JSON em memória), removido
-// na Task 6. A Task 8 os reescreve sobre o novo `catalog.rs` (SQLite).
-//
-// #[tauri::command]
-// fn data_status(state: State<'_, AppState>) -> DataStatus {
-//     state.catalog.status()
-// }
-//
-// #[tauri::command]
-// fn channels(state: State<'_, AppState>) -> Result<Vec<Channel>, String> {
-//     state.catalog.channels().map(|channels| (*channels).clone())
-// }
-//
-// #[tauri::command]
-// fn catalog_page(
-//     state: State<'_, AppState>,
-//     kind: String,
-//     query: String,
-//     group: Option<String>,
-//     page: usize,
-// ) -> Result<CatalogPage, String> {
-//     state.catalog.page(
-//         Kind::parse(&kind)?,
-//         &query,
-//         group.as_deref().filter(|value| !value.is_empty()),
-//         page,
-//     )
-// }
-//
-// #[tauri::command]
-// fn catalog_item(
-//     state: State<'_, AppState>,
-//     kind: String,
-//     id: String,
-// ) -> Result<ItemWithRelated, String> {
-//     state.catalog.item(Kind::parse(&kind)?, &id)
-// }
-//
-// #[tauri::command]
-// fn series_episodes(state: State<'_, AppState>, id: String) -> Result<SeriesEpisodes, String> {
-//     state.catalog.episodes(&id)
-// }
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportProgress {
+    source_id: i64,
+    parsed: usize,
+}
 
+#[tauri::command]
+fn list_sources(state: State<'_, AppState>) -> Result<Vec<Source>, String> {
+    let conn = state.conn()?;
+    import::list_sources(&conn)
+}
+
+/// Lê a lista de uma URL ou de um arquivo local e devolve um leitor bufferizado.
+fn open_source(url: &str, kind: &str) -> Result<Box<dyn std::io::BufRead>, String> {
+    match kind {
+        "file" => {
+            let file = std::fs::File::open(url)
+                .map_err(|error| format!("não foi possível abrir {url}: {error}"))?;
+            Ok(Box::new(BufReader::new(file)))
+        }
+        _ => {
+            let response = reqwest::blocking::get(url)
+                .map_err(|error| format!("não foi possível baixar a lista: {error}"))?;
+            if !response.status().is_success() {
+                return Err(format!("a lista respondeu {}", response.status()));
+            }
+            Ok(Box::new(BufReader::new(response)))
+        }
+    }
+}
+
+fn run_import(
+    app: &AppHandle,
+    state: &AppState,
+    source: Source,
+) -> Result<ImportReport, String> {
+    let reader = open_source(&source.url, &source.kind)?;
+    let mut conn = state.conn()?;
+    let source_id = source.id;
+    let handle = app.clone();
+    import::ingest(&mut conn, source_id, reader, &mut move |parsed| {
+        let _ = handle.emit("import:progress", ImportProgress { source_id, parsed });
+    })
+}
+
+#[tauri::command]
+fn add_source(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url_or_path: String,
+    kind: String,
+    label: Option<String>,
+) -> Result<ImportReport, String> {
+    let label = label
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_label(&url_or_path));
+    let source = {
+        let conn = state.conn()?;
+        import::upsert_source(&conn, &url_or_path, &label, &kind)?
+    };
+    run_import(&app, &state, source)
+}
+
+/// "http://host/get.php?..." vira "host"; um arquivo vira o nome do arquivo.
+fn default_label(url_or_path: &str) -> String {
+    url_or_path
+        .split('/')
+        .filter(|part| !part.is_empty() && !part.contains(':'))
+        .next()
+        .unwrap_or("Minha lista")
+        .to_owned()
+}
+
+#[tauri::command]
+fn sync_source(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<ImportReport, String> {
+    let source = {
+        let conn = state.conn()?;
+        import::get_source(&conn, id)?
+    };
+    run_import(&app, &state, source)
+}
+
+#[tauri::command]
+fn remove_source(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let mut conn = state.conn()?;
+    import::remove_source(&mut conn, id)
+}
+
+#[tauri::command]
+fn catalog_page(
+    state: State<'_, AppState>,
+    kind: String,
+    query: String,
+    group: Option<String>,
+    page: i64,
+    unwatched_only: bool,
+) -> Result<CatalogPage, String> {
+    let conn = state.conn()?;
+    catalog::page(
+        &conn,
+        Kind::parse(&kind)?,
+        &query,
+        group.as_deref().filter(|value| !value.is_empty()),
+        page,
+        unwatched_only,
+    )
+}
+
+#[tauri::command]
+fn catalog_item(
+    state: State<'_, AppState>,
+    kind: String,
+    id: String,
+) -> Result<ItemWithRelated, String> {
+    let conn = state.conn()?;
+    catalog::item(&conn, Kind::parse(&kind)?, &id)
+}
+
+#[tauri::command]
+fn series_episodes(state: State<'_, AppState>, id: String) -> Result<SeriesEpisodes, String> {
+    let conn = state.conn()?;
+    catalog::episodes(&conn, &id)
+}
+
+#[tauri::command]
+fn board(state: State<'_, AppState>) -> Result<Vec<Row>, String> {
+    let conn = state.conn()?;
+    catalog::board(&conn)
+}
+
+#[tauri::command]
+fn continue_watching(state: State<'_, AppState>, limit: i64) -> Result<Vec<ContinueEntry>, String> {
+    let conn = state.conn()?;
+    library::continue_watching(&conn, limit)
+}
+
+#[tauri::command]
+fn set_progress(
+    state: State<'_, AppState>,
+    owner_id: String,
+    owner_kind: String,
+    position: f64,
+    duration: Option<f64>,
+) -> Result<Option<Progress>, String> {
+    let conn = state.conn()?;
+    library::set_progress(&conn, &owner_id, &owner_kind, position, duration)
+}
+
+#[tauri::command]
+fn mark_watched(
+    state: State<'_, AppState>,
+    owner_id: String,
+    owner_kind: String,
+    completed: bool,
+) -> Result<(), String> {
+    let conn = state.conn()?;
+    library::mark_watched(&conn, &owner_id, &owner_kind, completed)
+}
+
+#[tauri::command]
+fn next_episode(state: State<'_, AppState>, series_id: String) -> Result<Option<EpisodeRef>, String> {
+    let conn = state.conn()?;
+    library::next_episode(&conn, &series_id)
+}
+
+#[tauri::command]
+fn toggle_favorite(state: State<'_, AppState>, owner_id: String) -> Result<bool, String> {
+    let conn = state.conn()?;
+    library::toggle_favorite(&conn, &owner_id)
+}
+
+#[tauri::command]
+fn favorites(state: State<'_, AppState>) -> Result<Vec<CatalogItem>, String> {
+    let conn = state.conn()?;
+    let ids = library::favorites(&conn)?;
+    catalog::by_ids(&conn, &ids)
+}
+
+#[tauri::command]
+fn get_setting(state: State<'_, AppState>, key: String) -> Result<Option<String>, String> {
+    let conn = state.conn()?;
+    settings::get(&conn, &key)
+}
+
+#[tauri::command]
+fn set_setting(state: State<'_, AppState>, key: String, value: String) -> Result<(), String> {
+    let conn = state.conn()?;
+    settings::set(&conn, &key, &value)
+}
+
+/// A ficha do TMDB é a única chamada de rede da UI, e o cache mora no banco. O
+/// `Connection` não cruza `await`, então cada acesso ao banco abre e fecha antes
+/// e depois da chamada HTTP.
 #[tauri::command]
 async fn title_meta(
     state: State<'_, AppState>,
@@ -97,8 +240,23 @@ async fn title_meta(
     title: String,
     year: Option<i64>,
 ) -> Result<Meta, String> {
-    let key = std::env::var("TMDB_API_KEY").ok();
-    Ok(state.tmdb.fetch(key, &kind, &title, year).await)
+    let tmdb_kind = if kind == "series" { "tv" } else { "movie" };
+    let cache_id = meta::cache_id(tmdb_kind, &title, year);
+
+    let (cached, key) = {
+        let conn = state.conn()?;
+        (meta::cached(&conn, &cache_id), settings::tmdb_key(&conn))
+    };
+    if let Some(cached) = cached {
+        return Ok(cached);
+    }
+
+    let fetched = state.tmdb.fetch(key, tmdb_kind, &title, year).await;
+    if fetched.source == "tmdb" {
+        let conn = state.conn()?;
+        meta::store(&conn, &cache_id, &fetched)?;
+    }
+    Ok(fetched)
 }
 
 /// Toda reprodução passa pelo proxy local: é o que permite tocar HTTP puro dentro
@@ -128,21 +286,43 @@ fn urlencoding(value: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_data = app.path().app_data_dir()?;
-            let data_dir = resolve_data_dir(app_data.clone());
+            let database = app_data.join("yellowtv.db");
+            let conn = db::open(&database).map_err(std::io::Error::other)?;
             let proxy_port = proxy::start()?;
 
-            println!("YellowTV: dados em {}", data_dir.display());
+            println!("YellowTV: banco em {}", database.display());
             println!("YellowTV: proxy de stream em 127.0.0.1:{proxy_port}");
 
             app.manage(AppState {
+                conn: Mutex::new(conn),
                 tmdb: Tmdb::new(),
                 proxy_port,
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![title_meta, stream_url])
+        .invoke_handler(tauri::generate_handler![
+            list_sources,
+            add_source,
+            sync_source,
+            remove_source,
+            catalog_page,
+            catalog_item,
+            series_episodes,
+            board,
+            continue_watching,
+            set_progress,
+            mark_watched,
+            next_episode,
+            toggle_favorite,
+            favorites,
+            get_setting,
+            set_setting,
+            title_meta,
+            stream_url
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

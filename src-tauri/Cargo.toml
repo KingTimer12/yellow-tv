@@ -24,12 +24,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
 axum = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "gzip", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "gzip", "json", "blocking"] }
 futures-util = "0.3"
 unicode-normalization = "0.1"
 sha2 = "0.10"
 hex = "0.4"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+tauri-plugin-dialog = "2.7.3"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
