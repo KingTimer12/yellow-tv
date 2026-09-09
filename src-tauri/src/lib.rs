@@ -1,5 +1,6 @@
-mod catalog;
-mod meta;
+pub mod catalog;
+pub mod db;
+pub mod meta;
 mod proxy;
 
 use std::path::PathBuf;
