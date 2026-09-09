@@ -10,7 +10,8 @@
     "serve": "vite preview",
     "tauri": "tauri",
     "update-channels": "bun run scripts/update-channel.ts",
-    "update-vod": "bun run scripts/update-vod.ts"
+    "update-vod": "bun run scripts/update-vod.ts",
+    "typecheck": "tsc --noEmit"
   },
   "license": "MIT",
   "dependencies": {
