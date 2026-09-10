@@ -2,7 +2,8 @@ import { useSearchParams } from "@solidjs/router";
 import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import PosterGrid from "~/components/PosterGrid";
 import PosterSkeleton from "~/components/PosterSkeleton";
-import { fetchCatalog, shortGroup, type CatalogItem, type CatalogKind } from "~/lib/vod";
+import { fetchCatalog, type CatalogKind } from "~/lib/api";
+import { shortGroup } from "~/lib/vod";
 import { ChevronLeft, ChevronRight, Search } from "./Icons";
 
 type CatalogBrowserProps = {
@@ -12,7 +13,7 @@ type CatalogBrowserProps = {
 };
 
 export default function CatalogBrowser(props: CatalogBrowserProps) {
-  const [params, setParams] = useSearchParams<{ q?: string; g?: string; p?: string }>();
+  const [params, setParams] = useSearchParams<{ q?: string; g?: string; p?: string; u?: string }>();
   const [search, setSearch] = createSignal<HTMLInputElement>();
   const [started, setStarted] = createSignal(false);
 
@@ -32,11 +33,18 @@ export default function CatalogBrowser(props: CatalogBrowserProps) {
   const query = () => params.q ?? "";
   const group = () => params.g ?? "";
   const page = () => Number(params.p ?? 0);
+  const unwatchedOnly = () => params.u === "1";
 
   const [data] = createResource(
     () =>
       started()
-        ? { kind: props.kind, query: query(), group: group(), page: page() }
+        ? {
+            kind: props.kind,
+            query: query(),
+            group: group(),
+            page: page(),
+            unwatchedOnly: unwatchedOnly(),
+          }
         : undefined,
     fetchCatalog,
   );
@@ -96,6 +104,17 @@ export default function CatalogBrowser(props: CatalogBrowserProps) {
             <li class="anim-fade">
               <button
                 type="button"
+                onClick={() => setParams({ u: unwatchedOnly() ? undefined : "1", p: undefined })}
+                class={chip}
+                classList={{ "border-amber bg-amber/12 text-amber": unwatchedOnly() }}
+                aria-pressed={unwatchedOnly()}
+              >
+                Não assistidos
+              </button>
+            </li>
+            <li class="anim-fade">
+              <button
+                type="button"
                 onClick={() => setParams({ g: undefined, p: undefined })}
                 class={chip}
                 classList={{ "border-amber bg-amber/12 text-amber": !group() }}
@@ -142,7 +161,7 @@ export default function CatalogBrowser(props: CatalogBrowserProps) {
                   </div>
                 }
               >
-                <PosterGrid items={data()!.items as CatalogItem[]} kind={props.kind} />
+                <PosterGrid items={data()!.items} />
               </Show>
             </Show>
           }
