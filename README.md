@@ -10,29 +10,15 @@ bun install
 bun run tauri dev
 ```
 
-## As listas
+## Dados
 
-O app lê três coisas de um diretório de dados:
+O catálogo é local. Na primeira execução o app abre `/setup`: cole a URL da sua
+lista M3U (ou escolha um arquivo `.m3u`), e o Rust parseia, normaliza e grava
+tudo em `app_data/yellowtv.db`. Filmes, séries, canais, progresso e favoritos
+vivem nesse banco. A chave do TMDB é opcional e pode ser colada no onboarding ou
+exportada como `TMDB_API_KEY`.
 
-```
-<dados>/lista_pro.json        canais de TV
-<dados>/vod/filmes.json       filmes
-<dados>/vod/series.json       séries (sem episódios)
-<dados>/vod/series/<id>.json  episódios de uma série
-```
-
-Para gerar:
-
-```sh
-bun run update-channels   # canais
-bun run update-vod        # filmes e séries
-```
-
-Por padrão os scripts escrevem em `./data`; `YELLOWTV_DATA_DIR` muda o destino.
-
-O Rust procura os dados nesta ordem: `YELLOWTV_DATA_DIR`, a pasta de dados do app
-(`~/Library/Application Support/YellowTV/data` no macOS), `./data` e `../data`.
-O caminho escolhido aparece no console ao iniciar.
+Não existe mais nenhum JSON pré-gerado no repositório.
 
 ## Sinopse e elenco
 

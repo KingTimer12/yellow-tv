@@ -1,5 +1,2 @@
 node_modules
 dist
-
-# As listas são geradas pelos scripts e pesam ~70 MB
-data/
