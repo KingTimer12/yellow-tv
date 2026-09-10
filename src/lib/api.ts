@@ -78,6 +78,7 @@ export type EpisodeRow = {
   episode: number;
   title: string | null;
   streams: StreamRef[];
+  positionSecs: number;
   percent: number;
   completed: boolean;
 };

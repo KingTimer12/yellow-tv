@@ -104,6 +104,7 @@ export default function SeriePage() {
                         title={`${show().title} T${episode().season} E${episode().episode}`}
                         poster={show().logo ?? undefined}
                         owner={{ id: episode().id, kind: "episode" }}
+                        startAt={episode().completed ? 0 : episode().positionSecs}
                         onEnded={advance}
                       />
                     )}
