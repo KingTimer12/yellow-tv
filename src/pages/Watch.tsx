@@ -29,9 +29,10 @@ export default function Watch() {
 
   // A lista de favoritos serve só para o estado inicial; depois do primeiro
   // toggle o signal local já reflete a verdade sem precisar recarregar.
-  const [favoritesList] = createResource(fetchFavorites);
+  const [favoritesList, { refetch: refetchFavorites }] = createResource(fetchFavorites);
   const favorite = () =>
     favoriteOverride() ?? (favoritesList()?.some(entry => entry.id === channel()?.id) ?? false);
+  const favoriteIds = () => new Set((favoritesList() ?? []).map(item => item.id));
 
   createEffect(() => {
     params.id;
@@ -122,7 +123,10 @@ export default function Watch() {
                 <div class="ml-auto flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={async () => setFavoriteOverride(await toggleFavorite(current().id))}
+                    onClick={async () => {
+                      setFavoriteOverride(await toggleFavorite(current().id));
+                      await refetchFavorites();
+                    }}
                     class="press flex items-center gap-2 rounded-sm border border-edge px-3 py-2 text-sm text-paper/70 hover:border-amber hover:text-amber"
                     classList={{ "border-amber/60 text-amber": favorite() }}
                     aria-pressed={favorite()}
@@ -167,7 +171,12 @@ export default function Watch() {
           </Show>
         </h2>
         <Show when={!list.pending()} fallback={<ChannelSkeleton count={10} />}>
-          <ChannelList channels={neighbours()} currentId={params.id} />
+          <ChannelList
+            channels={neighbours()}
+            currentId={params.id}
+            favoriteIds={favoriteIds()}
+            onToggle={refetchFavorites}
+          />
         </Show>
       </aside>
     </main>
