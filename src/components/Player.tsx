@@ -1,4 +1,11 @@
-import { createEffect, createResource, createSignal, onCleanup, Show } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  onCleanup,
+  Show,
+  untrack,
+} from "solid-js";
 import { reportProgress, streamUrl, type OwnerKind } from "~/lib/api";
 
 type PlayerProps = {
@@ -45,6 +52,11 @@ export default function Player(props: PlayerProps) {
 
     setError(undefined);
     setLoading(true);
+    // Congela o dono no início do efeito: quando a série avança de episódio,
+    // `props.owner` já aponta para o próximo antes de o cleanup rodar, e gravar
+    // o playhead do episódio que acabou contra o id do seguinte o marcaria como
+    // assistido sem nunca ter tocado.
+    const owner = untrack(() => props.owner);
     let cancelled = false;
     let teardown = () => {};
 
@@ -126,7 +138,6 @@ export default function Player(props: PlayerProps) {
 
     let lastReport = 0;
     const report = () => {
-      const owner = props.owner;
       if (!owner || !element.currentTime) return;
       const duration = Number.isFinite(element.duration) ? element.duration : null;
       void reportProgress(owner.id, owner.kind, element.currentTime, duration).catch(
