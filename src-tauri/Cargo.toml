@@ -22,9 +22,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "fs", "io-util"] }
 axum = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "gzip", "json", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "gzip", "json"] }
 futures-util = "0.3"
 unicode-normalization = "0.1"
 sha2 = "0.10"

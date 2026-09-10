@@ -9,6 +9,9 @@ mod proxy;
 pub mod settings;
 
 use std::io::BufReader;
+
+use futures_util::StreamExt;
+use tokio::io::AsyncWriteExt;
 use std::sync::Mutex;
 
 use catalog::{CatalogItem, CatalogPage, ItemWithRelated, Kind, Row, SeriesEpisodes};
@@ -48,44 +51,121 @@ fn list_sources(state: State<'_, AppState>) -> Result<Vec<Source>, String> {
     import::list_sources(&conn)
 }
 
-/// Lê a lista de uma URL ou de um arquivo local e devolve um leitor bufferizado.
-fn open_source(url: &str, kind: &str) -> Result<Box<dyn std::io::BufRead>, String> {
-    match kind {
-        "file" => {
-            let file = std::fs::File::open(url)
-                .map_err(|error| format!("não foi possível abrir {url}: {error}"))?;
-            Ok(Box::new(BufReader::new(file)))
+/// Arquivo temporário que se apaga sozinho quando sai de escopo.
+struct TempFile {
+    path: std::path::PathBuf,
+}
+
+impl TempFile {
+    fn new() -> Self {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_nanos())
+            .unwrap_or(0);
+        let name = format!("yellowtv-import-{}-{unique}.m3u", std::process::id());
+        Self {
+            path: std::env::temp_dir().join(name),
         }
-        _ => {
-            let response = reqwest::blocking::get(url)
-                .map_err(|error| format!("não foi possível baixar a lista: {error}"))?;
-            if !response.status().is_success() {
-                return Err(format!("a lista respondeu {}", response.status()));
-            }
-            Ok(Box::new(BufReader::new(response)))
-        }
+    }
+
+    fn open(&self) -> Result<Box<dyn std::io::BufRead>, String> {
+        let file = std::fs::File::open(&self.path)
+            .map_err(|error| format!("não foi possível reabrir o arquivo baixado: {error}"))?;
+        Ok(Box::new(BufReader::new(file)))
     }
 }
 
-fn run_import(
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn open_local(path: &str) -> Result<Box<dyn std::io::BufRead>, String> {
+    let file = std::fs::File::open(path)
+        .map_err(|error| format!("não foi possível abrir {path}: {error}"))?;
+    Ok(Box::new(BufReader::new(file)))
+}
+
+/// Baixa a lista para um arquivo temporário, em streaming.
+///
+/// O download é assíncrono por obrigação, não por gosto: `reqwest::blocking`
+/// monta um runtime tokio só dele e o dropa ao sair da função, o que entra em
+/// pânico quando a chamada já está dentro de um runtime — que é o caso de
+/// qualquer comando `async` do Tauri. Gravar em disco em vez de na memória
+/// mantém o parse em streaming e o consumo constante mesmo em listas grandes.
+async fn download_to_temp(url: &str) -> Result<TempFile, String> {
+    // `without_url` em todo erro: a URL de uma lista Xtream carrega
+    // `username`/`password` e não pode aparecer numa mensagem de erro.
+    let response = reqwest::get(url)
+        .await
+        .map_err(|error| format!("não foi possível baixar a lista: {}", error.without_url()))?;
+    if !response.status().is_success() {
+        return Err(format!("a lista respondeu {}", response.status()));
+    }
+
+    let temp = TempFile::new();
+    let mut file = tokio::fs::File::create(&temp.path)
+        .await
+        .map_err(|error| format!("não foi possível criar o arquivo temporário: {error}"))?;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk =
+            chunk.map_err(|error| format!("download interrompido: {}", error.without_url()))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|error| format!("falha ao gravar a lista baixada: {error}"))?;
+    }
+    file.flush()
+        .await
+        .map_err(|error| format!("falha ao gravar a lista baixada: {error}"))?;
+    Ok(temp)
+}
+
+/// Abre a origem da lista. Fica fora dos comandos porque o `TempFile` precisa
+/// continuar vivo enquanto a ingestão lê o arquivo.
+async fn open_source(source: &Source) -> (Result<Box<dyn std::io::BufRead>, String>, Option<TempFile>) {
+    if source.kind == "file" {
+        return (open_local(&source.url), None);
+    }
+    match download_to_temp(&source.url).await {
+        Ok(temp) => {
+            let reader = temp.open();
+            (reader, Some(temp))
+        }
+        Err(error) => (Err(error), None),
+    }
+}
+
+/// Os dois helpers abaixo existem para que nenhum `MutexGuard` do `Connection`
+/// (que não é `Send`) apareça no corpo de uma função `async`.
+fn begin_import(
+    state: &AppState,
+    url: &str,
+    label: &str,
+    kind: &str,
+) -> Result<(Source, bool), String> {
+    let conn = state.conn()?;
+    import::begin_add(&conn, url, label, kind)
+}
+
+fn finish_import(
     app: &AppHandle,
     state: &AppState,
-    source: Source,
+    source: &Source,
+    was_new: bool,
+    reader: Result<Box<dyn std::io::BufRead>, String>,
 ) -> Result<ImportReport, String> {
-    let reader = open_source(&source.url, &source.kind)?;
     let mut conn = state.conn()?;
     let source_id = source.id;
     let handle = app.clone();
-    import::ingest(&mut conn, source_id, reader, &mut move |parsed| {
+    import::finish_add(&mut conn, source, was_new, reader, &mut move |parsed| {
         let _ = handle.emit("import:progress", ImportProgress { source_id, parsed });
     })
 }
 
-/// `async` aqui é o atributo do Tauri: mantém a função síncrona (o `Connection`
-/// não é `Send` e nenhum guard cruza `await`) mas tira o download e o parse da
-/// thread principal, que é a mesma da WebView.
-#[tauri::command(async)]
-fn add_source(
+#[tauri::command]
+async fn add_source(
     app: AppHandle,
     state: State<'_, AppState>,
     url_or_path: String,
@@ -95,18 +175,26 @@ fn add_source(
     let label = label
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| default_label(&url_or_path));
-    let (source, was_new) = {
-        let conn = state.conn()?;
-        import::begin_add(&conn, &url_or_path, &label, &kind)?
-    };
+    let (source, was_new) = begin_import(&state, &url_or_path, &label, &kind)?;
     // O download roda sem o lock; só depois o banco é travado para a ingestão.
-    let reader = open_source(&source.url, &source.kind);
-    let source_id = source.id;
-    let handle = app.clone();
-    let mut conn = state.conn()?;
-    import::finish_add(&mut conn, &source, was_new, reader, &mut move |parsed| {
-        let _ = handle.emit("import:progress", ImportProgress { source_id, parsed });
-    })
+    let (reader, _temp) = open_source(&source).await;
+    finish_import(&app, &state, &source, was_new, reader)
+}
+
+fn load_source(state: &AppState, id: i64) -> Result<Source, String> {
+    let conn = state.conn()?;
+    import::get_source(&conn, id)
+}
+
+#[tauri::command]
+async fn sync_source(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<ImportReport, String> {
+    let source = load_source(&state, id)?;
+    let (reader, _temp) = open_source(&source).await;
+    finish_import(&app, &state, &source, false, reader)
 }
 
 /// "http://host/get.php?..." vira "host"; um arquivo vira o nome do arquivo.
@@ -117,19 +205,6 @@ fn default_label(url_or_path: &str) -> String {
         .next()
         .unwrap_or("Minha lista")
         .to_owned()
-}
-
-#[tauri::command(async)]
-fn sync_source(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<ImportReport, String> {
-    let source = {
-        let conn = state.conn()?;
-        import::get_source(&conn, id)?
-    };
-    run_import(&app, &state, source)
 }
 
 #[tauri::command]
