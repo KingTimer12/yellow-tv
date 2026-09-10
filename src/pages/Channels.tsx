@@ -163,7 +163,7 @@ export default function Browse() {
           }
         >
           <p class="anim-fade p-8 text-sm text-live">
-            {list.error()?.message ?? "A lista de canais não carregou."}
+            {list.error() ? String(list.error()) : "A lista de canais não carregou."}
           </p>
         </Show>
       </section>

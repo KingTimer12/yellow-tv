@@ -29,7 +29,7 @@ export default function Biblioteca() {
           when={history.error}
         >
           <p class="text-sm text-live">
-            {history.error?.message ?? "O histórico não carregou."}
+            {history.error ? String(history.error) : "O histórico não carregou."}
           </p>
         </Show>
         <Show
@@ -92,7 +92,7 @@ export default function Biblioteca() {
         </h2>
         <Show when={list.error()}>
           <p class="text-sm text-live">
-            {list.error()?.message ?? "As listas não carregaram."}
+            {list.error() ? String(list.error()) : "As listas não carregaram."}
           </p>
         </Show>
         <Show when={list.pending()}>

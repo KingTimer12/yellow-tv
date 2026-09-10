@@ -1,5 +1,14 @@
 import { useSearchParams } from "@solidjs/router";
-import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
 import PosterGrid from "~/components/PosterGrid";
 import PosterSkeleton from "~/components/PosterSkeleton";
 import { fetchCatalog, type CatalogKind } from "~/lib/api";
@@ -12,10 +21,18 @@ type CatalogBrowserProps = {
   placeholder: string;
 };
 
+const SEARCH_DEBOUNCE_MS = 220;
+
 export default function CatalogBrowser(props: CatalogBrowserProps) {
   const [params, setParams] = useSearchParams<{ q?: string; g?: string; p?: string; u?: string }>();
   const [search, setSearch] = createSignal<HTMLInputElement>();
   const [started, setStarted] = createSignal(false);
+  // O valor exibido no input muda a cada tecla; a URL (fonte da verdade para
+  // `query()`) só é atualizada depois do debounce, evitando um `catalog_page`
+  // por tecla digitada.
+  const [inputValue, setInputValue] = createSignal(params.q ?? "");
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(debounceTimer));
 
   onMount(() => {
     setStarted(true);
@@ -31,6 +48,14 @@ export default function CatalogBrowser(props: CatalogBrowserProps) {
   });
 
   const query = () => params.q ?? "";
+
+  // Reload, botão voltar/avançar ou o chip "Tudo" mudam a URL por fora do
+  // input: mantém o campo em sincronia sem brigar com o que a pessoa digitou
+  // (só entra em ação quando a URL já refletir esse valor).
+  createEffect(() => {
+    const q = query();
+    if (q !== inputValue()) setInputValue(q);
+  });
   const group = () => params.g ?? "";
   const page = () => Number(params.p ?? 0);
   const unwatchedOnly = () => params.u === "1";
@@ -86,10 +111,15 @@ export default function CatalogBrowser(props: CatalogBrowserProps) {
         <input
           ref={setSearch}
           type="search"
-          value={query()}
-          onInput={event =>
-            setParams({ q: event.currentTarget.value || undefined, p: undefined })
-          }
+          value={inputValue()}
+          onInput={event => {
+            const value = event.currentTarget.value;
+            setInputValue(value);
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+              setParams({ q: value || undefined, p: undefined });
+            }, SEARCH_DEBOUNCE_MS);
+          }}
           placeholder={props.placeholder}
           class="w-full bg-transparent text-paper outline-none placeholder:text-paper/30"
         />
@@ -166,7 +196,7 @@ export default function CatalogBrowser(props: CatalogBrowserProps) {
             </Show>
           }
         >
-          <p class="anim-fade py-12 text-sm text-live">{(data.error as Error).message}</p>
+          <p class="anim-fade py-12 text-sm text-live">{String(data.error)}</p>
         </Show>
       </div>
 
