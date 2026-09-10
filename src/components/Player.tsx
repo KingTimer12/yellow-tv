@@ -1,11 +1,18 @@
 import { createEffect, createResource, createSignal, onCleanup, Show } from "solid-js";
-import { streamUrl } from "~/lib/vod";
+import { reportProgress, streamUrl, type OwnerKind } from "~/lib/api";
 
 type PlayerProps = {
   src: string;
   title: string;
   poster?: string;
+  /** Quando presente, a posição é gravada no banco. */
+  owner?: { id: string; kind: OwnerKind };
+  /** Segundos de onde retomar. */
+  startAt?: number;
+  onEnded?: () => void;
 };
+
+const REPORT_EVERY_MS = 5000;
 
 const DEAD_CHANNEL = "Este canal não respondeu. Tente outro ou volte em alguns instantes.";
 
@@ -108,8 +115,45 @@ export default function Player(props: PlayerProps) {
     element.addEventListener("playing", onReady);
     element.addEventListener("error", fail);
 
+    // Retomada: só depois de o vídeo saber a duração é que dá para posicionar.
+    const seek = () => {
+      const target = props.startAt ?? 0;
+      if (target > 0 && Number.isFinite(element.duration) && element.currentTime < 1) {
+        element.currentTime = target;
+      }
+    };
+    element.addEventListener("loadedmetadata", seek);
+
+    let lastReport = 0;
+    const report = () => {
+      const owner = props.owner;
+      if (!owner || !element.currentTime) return;
+      const duration = Number.isFinite(element.duration) ? element.duration : null;
+      void reportProgress(owner.id, owner.kind, element.currentTime, duration).catch(
+        () => undefined,
+      );
+    };
+    const onTimeUpdate = () => {
+      const now = Date.now();
+      if (now - lastReport < REPORT_EVERY_MS) return;
+      lastReport = now;
+      report();
+    };
+    const onEnded = () => {
+      report();
+      props.onEnded?.();
+    };
+    element.addEventListener("timeupdate", onTimeUpdate);
+    element.addEventListener("pause", report);
+    element.addEventListener("ended", onEnded);
+
     onCleanup(() => {
       cancelled = true;
+      report();
+      element.removeEventListener("loadedmetadata", seek);
+      element.removeEventListener("timeupdate", onTimeUpdate);
+      element.removeEventListener("pause", report);
+      element.removeEventListener("ended", onEnded);
       element.removeEventListener("loadeddata", onReady);
       element.removeEventListener("playing", onReady);
       element.removeEventListener("error", fail);
