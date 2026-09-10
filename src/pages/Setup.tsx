@@ -1,5 +1,5 @@
 import { useNavigate } from "@solidjs/router";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, getOwner, onCleanup, onMount, runWithOwner, Show } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Play, Search } from "~/components/Icons";
@@ -23,14 +23,20 @@ export default function Setup() {
   const [parsed, setParsed] = createSignal(0);
   const [report, setReport] = createSignal<ImportReport>();
   const [error, setError] = createSignal<string>();
+  const [lastAction, setLastAction] = createSignal<() => void>();
 
   onMount(async () => {
+    // O `await` aqui faz a continuação retomar fora do owner reativo do
+    // Solid, então guardamos o owner antes de esperar e reanexamos o
+    // `onCleanup` com `runWithOwner` — senão o listener sobreviveria à
+    // navegação para fora de `/setup`.
+    const owner = getOwner();
     // O import roda em Rust e vai avisando quantas entradas já entraram.
     const stop = await listen<{ sourceId: number; parsed: number }>(
       "import:progress",
       event => setParsed(event.payload.parsed),
     );
-    onCleanup(stop);
+    runWithOwner(owner, () => onCleanup(stop));
   });
 
   const run = async (task: () => Promise<ImportReport>) => {
@@ -51,6 +57,7 @@ export default function Setup() {
   const addUrl = () => {
     const value = url().trim();
     if (!value) return setError("Cole o endereço da lista M3U.");
+    setLastAction(() => addUrl);
     void run(() => addSource(value, "url"));
   };
 
@@ -60,8 +67,11 @@ export default function Setup() {
       filters: [{ name: "Lista M3U", extensions: ["m3u", "m3u8", "txt"] }],
     });
     if (typeof picked !== "string") return;
+    setLastAction(() => addFile);
     void run(() => addSource(picked, "file"));
   };
+
+  const retry = () => lastAction()?.();
 
   const saveKeyAndGo = async () => {
     const key = tmdb().trim();
@@ -123,7 +133,7 @@ export default function Setup() {
           <p class="text-sm text-live">{error()}</p>
           <button
             type="button"
-            onClick={addUrl}
+            onClick={retry}
             class="press mt-2 text-sm text-amber hover:underline"
           >
             Tentar de novo
