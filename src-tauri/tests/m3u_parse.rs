@@ -127,3 +127,68 @@ fn lista_vazia_devolve_zero() {
     assert!(entries.is_empty());
     assert_eq!(outcome.parsed, 0);
 }
+
+// Regressão: a lista real do usuário usa "S01 E01" com espaço em 100% das
+// 227 mil linhas de série. Sem o separador opcional, todo episódio virava um
+// filme solto e séries não existiam no catálogo.
+#[test]
+fn serie_no_formato_s01_espaco_e01() {
+    let (entries, _) = parse(
+        "#EXTINF:-1 tvg-id=\"\" group-title=\"Series | Netflix\",A Bíblia S01 E02\nhttp://host/b102\n",
+    );
+    let entry = &entries[0];
+    assert!(matches!(entry.kind, EntryKind::Series));
+    assert_eq!(entry.title, "A Bíblia");
+    assert_eq!(entry.season, Some(1));
+    assert_eq!(entry.episode, Some(2));
+}
+
+#[test]
+fn serie_com_marcador_entre_titulo_e_episodio() {
+    let (entries, _) = parse(
+        "#EXTINF:-1 group-title=\"Series | Legendadas\",Pennyworth: A Origem [L] S01 E10\nhttp://host/p110\n",
+    );
+    let entry = &entries[0];
+    assert!(matches!(entry.kind, EntryKind::Series));
+    assert_eq!(entry.season, Some(1));
+    assert_eq!(entry.episode, Some(10));
+    // O colchete some do title_norm, então todos os episódios caem na mesma série.
+    assert_eq!(entry.title_norm, "pennyworth a origem");
+}
+
+#[test]
+fn serie_com_separador_hifen() {
+    let (entries, _) = parse("#EXTINF:-1,Dark S02-E05\nhttp://host/d205\n");
+    assert_eq!(entries[0].season, Some(2));
+    assert_eq!(entries[0].episode, Some(5));
+}
+
+// O 's' precisa abrir um token: sem essa guarda, um "s" no fim de palavra
+// seguido de número transformaria filmes em episódios.
+#[test]
+fn filme_com_numero_apos_palavra_terminada_em_s_nao_vira_serie() {
+    let (entries, _) = parse("#EXTINF:-1,Os 8 Escolhidos\nhttp://host/oito\n");
+    assert!(matches!(entries[0].kind, EntryKind::Movie));
+    assert_eq!(entries[0].season, None);
+}
+
+// "Series | DirecTV" e "Series | PlutoTV" contêm "tv" no meio de uma palavra:
+// com busca por substring o grupo inteiro virava canal.
+#[test]
+fn grupo_de_serie_com_tv_no_nome_nao_vira_canal() {
+    let (entries, _) = parse(
+        "#EXTINF:-1 group-title=\"Series | DirecTV\",Rebelde S01 E01\nhttp://host/r101\n",
+    );
+    assert!(matches!(entries[0].kind, EntryKind::Series));
+
+    let (filmes, _) = parse(
+        "#EXTINF:-1 group-title=\"Series | PlutoTV\",Algum Filme\nhttp://host/af\n",
+    );
+    assert!(matches!(filmes[0].kind, EntryKind::Movie));
+}
+
+#[test]
+fn grupo_de_canal_continua_sendo_canal() {
+    let (entries, _) = parse("#EXTINF:-1 group-title=\"Canais | Abertos\",Globo HD\nhttp://host/g\n");
+    assert!(matches!(entries[0].kind, EntryKind::Channel));
+}

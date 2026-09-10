@@ -147,9 +147,15 @@ fn series_marks(name: &str) -> Option<(i64, i64, String)> {
     let chars: Vec<char> = name.chars().collect();
     let lower: Vec<char> = name.to_lowercase().chars().collect();
 
-    // Padrão SxxEyy
+    // Padrão SxxEyy, com ou sem separador: "S01E01", "S01 E01", "S01-E01".
+    // O separador é obrigatório de aceitar: listas inteiras usam só a forma com
+    // espaço, e sem isso todo episódio vira um filme solto.
     for index in 0..chars.len() {
         if lower[index] != 's' {
+            continue;
+        }
+        // O 's' precisa abrir um token, senão "Os 8 Escolhidos" viraria episódio.
+        if index > 0 && chars[index - 1].is_alphanumeric() {
             continue;
         }
         let mut cursor = index + 1;
@@ -157,11 +163,26 @@ fn series_marks(name: &str) -> Option<(i64, i64, String)> {
         while cursor < chars.len() && chars[cursor].is_ascii_digit() {
             cursor += 1;
         }
-        if cursor == season_start || cursor >= chars.len() || lower[cursor] != 'e' {
+        if cursor == season_start {
             continue;
         }
-        let season: i64 = chars[season_start..cursor].iter().collect::<String>().parse().ok()?;
-        cursor += 1;
+        // `continue`, não `?`: um número absurdo numa linha não pode abortar a
+        // busca e fazer a linha inteira ser classificada errado.
+        let Ok(season) = chars[season_start..cursor]
+            .iter()
+            .collect::<String>()
+            .parse::<i64>()
+        else {
+            continue;
+        };
+        let mut separator = cursor;
+        while separator < chars.len() && matches!(chars[separator], ' ' | '-' | '.' | '_') {
+            separator += 1;
+        }
+        if separator >= chars.len() || lower[separator] != 'e' {
+            continue;
+        }
+        let mut cursor = separator + 1;
         let episode_start = cursor;
         while cursor < chars.len() && chars[cursor].is_ascii_digit() {
             cursor += 1;
@@ -169,7 +190,13 @@ fn series_marks(name: &str) -> Option<(i64, i64, String)> {
         if cursor == episode_start {
             continue;
         }
-        let episode: i64 = chars[episode_start..cursor].iter().collect::<String>().parse().ok()?;
+        let Ok(episode) = chars[episode_start..cursor]
+            .iter()
+            .collect::<String>()
+            .parse::<i64>()
+        else {
+            continue;
+        };
         let head: String = chars[..index].iter().collect();
         return Some((season, episode, head));
     }
@@ -194,8 +221,13 @@ fn series_marks(name: &str) -> Option<(i64, i64, String)> {
         if after == episode_start {
             continue;
         }
-        let season: i64 = chars[before..index].iter().collect::<String>().parse().ok()?;
-        let episode: i64 = chars[episode_start..after].iter().collect::<String>().parse().ok()?;
+        let Ok(season) = chars[before..index].iter().collect::<String>().parse::<i64>() else {
+            continue;
+        };
+        let Ok(episode) = chars[episode_start..after].iter().collect::<String>().parse::<i64>()
+        else {
+            continue;
+        };
         let head: String = chars[..before].iter().collect();
         return Some((season, episode, head));
     }
@@ -288,9 +320,15 @@ fn looks_like_channel(attrs: &[(String, String)], group: Option<&str>) -> bool {
     }
     let Some(group) = group else { return false };
     let folded = ids::normalize(group);
-    ["canais", "canal", "tv", "ao vivo", "live", "abertos"]
-        .iter()
-        .any(|needle| folded.contains(needle))
+    // Token inteiro, não substring: "Series | DirecTV" e "Series | PlutoTV"
+    // contêm "tv" no meio de uma palavra e viravam canal.
+    if folded
+        .split_whitespace()
+        .any(|token| matches!(token, "canais" | "canal" | "tv" | "live" | "abertos"))
+    {
+        return true;
+    }
+    folded.contains("ao vivo")
 }
 
 fn build(attrs: Vec<(String, String)>, name: String, url: String) -> Entry {
