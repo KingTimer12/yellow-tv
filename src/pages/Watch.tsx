@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, StarFilled, StarOutline } from "~/components
 import Player from "~/components/Player";
 import SourcePicker from "~/components/SourcePicker";
 import { formatNumber, useChannels } from "~/lib/channels";
-import { fetchFavorites, fetchItem, markWatched, toggleFavorite } from "~/lib/api";
+import { fetchFavorites, fetchItem, toggleFavorite } from "~/lib/api";
 
 export default function Watch() {
   const params = useParams<{ id: string }>();
@@ -61,10 +61,6 @@ export default function Watch() {
     };
     window.addEventListener("keydown", onKey);
     onCleanup(() => window.removeEventListener("keydown", onKey));
-  });
-
-  createEffect(() => {
-    if (channel()) void markWatched(params.id, "item", false);
   });
 
   return (
