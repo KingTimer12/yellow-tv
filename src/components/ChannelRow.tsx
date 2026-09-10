@@ -13,7 +13,8 @@ type ChannelRowProps = {
 
 export default function ChannelRow(props: ChannelRowProps) {
   const channel = () => props.channel;
-  const [favorite, setFavorite] = createSignal(props.favorite ?? false);
+  const [override, setOverride] = createSignal<boolean>();
+  const favorite = () => override() ?? props.favorite ?? false;
 
   return (
     <div
@@ -43,7 +44,7 @@ export default function ChannelRow(props: ChannelRowProps) {
         type="button"
         onClick={async event => {
           event.preventDefault();
-          setFavorite(await toggleFavorite(channel().id));
+          setOverride(await toggleFavorite(channel().id));
           props.onToggle?.();
         }}
         class="press grid w-12 shrink-0 place-content-center text-paper/25 hover:text-amber"
