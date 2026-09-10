@@ -35,6 +35,8 @@ export const StarFilled = (props: IconProps) => base(props, <path d={STAR} />, t
 
 export const Play = (props: IconProps) => base(props, <path d="M7 4.5l12 7.5-12 7.5z" />, true);
 
+export const Check = (props: IconProps) => base(props, <path d="M4 12l5 5L20 6" />);
+
 export const ChevronLeft = (props: IconProps) => base(props, <path d="M15 5l-7 7 7 7" />);
 export const ChevronRight = (props: IconProps) => base(props, <path d="M9 5l7 7-7 7" />);
 

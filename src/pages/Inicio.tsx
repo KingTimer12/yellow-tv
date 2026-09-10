@@ -1,8 +1,46 @@
+import { createResource, For, Show } from "solid-js";
+import PosterRow from "~/components/PosterRow";
+import PosterSkeleton from "~/components/PosterSkeleton";
+import { fetchBoard } from "~/lib/api";
+
 export default function Inicio() {
+  const [rows] = createResource(fetchBoard);
+
   return (
-    <main class="mx-auto max-w-7xl px-4 py-6">
-      <h1 class="font-display text-2xl font-extrabold tracking-[-0.03em] text-paper">Início</h1>
-      <p class="mt-2 text-sm text-paper/55">Em breve.</p>
+    <main class="relative z-10 mx-auto max-w-7xl space-y-8 px-4 py-6">
+      <Show
+        when={!rows.loading}
+        fallback={
+          <div class="space-y-6">
+            <PosterSkeleton />
+          </div>
+        }
+      >
+        <Show
+          when={!rows.error}
+          fallback={<p class="anim-fade py-12 text-sm text-live">{String(rows.error)}</p>}
+        >
+          <Show
+            when={rows()?.length}
+            fallback={
+              <div class="anim-reveal py-16 text-center">
+                <p class="font-display text-lg text-paper/70">Catálogo vazio.</p>
+                <p class="mt-1 text-sm text-paper/40">
+                  Atualize a lista em Biblioteca para trazer os títulos.
+                </p>
+              </div>
+            }
+          >
+            <For each={rows()}>
+              {(row, index) => (
+                <div style={{ "--i": Math.min(index(), 8) }}>
+                  <PosterRow title={row.title} items={row.items} />
+                </div>
+              )}
+            </For>
+          </Show>
+        </Show>
+      </Show>
     </main>
   );
 }
