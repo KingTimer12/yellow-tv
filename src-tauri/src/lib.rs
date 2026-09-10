@@ -7,6 +7,7 @@ pub mod m3u;
 pub mod meta;
 mod proxy;
 pub mod settings;
+pub mod subtitles;
 
 use std::io::BufReader;
 
@@ -207,6 +208,14 @@ fn default_label(url_or_path: &str) -> String {
         .to_owned()
 }
 
+/// Lê a legenda do disco e devolve WebVTT. A conversão fica no Rust de
+/// propósito: decodificação de Latin-1 e reescrita de carimbos de tempo são
+/// trabalho de texto que não tem por que rodar na thread da interface.
+#[tauri::command]
+fn load_subtitle(path: String) -> Result<String, String> {
+    subtitles::load(std::path::Path::new(&path))
+}
+
 #[tauri::command]
 fn remove_source(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let mut conn = state.conn()?;
@@ -392,6 +401,7 @@ pub fn run() {
             list_sources,
             add_source,
             sync_source,
+            load_subtitle,
             remove_source,
             catalog_page,
             catalog_item,

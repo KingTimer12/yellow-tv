@@ -197,12 +197,13 @@ pub fn ingest<R: BufRead>(
             .map_err(stringify)?;
         let mut insert_stream = transaction
             .prepare(
-                "INSERT INTO streams(owner_id, owner_kind, source_id, url, quality, channel_number)
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO streams(owner_id, owner_kind, source_id, url, quality, channel_number, variant)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
                  ON CONFLICT(owner_id, url) DO UPDATE SET
                    source_id = excluded.source_id,
                    quality = excluded.quality,
-                   channel_number = excluded.channel_number",
+                   channel_number = excluded.channel_number,
+                   variant = excluded.variant",
             )
             .map_err(stringify)?;
 
@@ -244,7 +245,8 @@ pub fn ingest<R: BufRead>(
                             source_id,
                             entry.url,
                             entry.quality,
-                            None::<i64>
+                            None::<i64>,
+                            entry.variant
                         ])
                     }
                     _ => insert_stream.execute(params![
@@ -253,7 +255,8 @@ pub fn ingest<R: BufRead>(
                         source_id,
                         entry.url,
                         entry.quality,
-                        entry.channel_number
+                        entry.channel_number,
+                        entry.variant
                     ]),
                 });
 

@@ -192,3 +192,49 @@ fn grupo_de_canal_continua_sendo_canal() {
     let (entries, _) = parse("#EXTINF:-1 group-title=\"Canais | Abertos\",Globo HD\nhttp://host/g\n");
     assert!(matches!(entries[0].kind, EntryKind::Channel));
 }
+
+// A marca de versão é jogada fora do título de propósito (as duas versões têm
+// que cair no mesmo episódio), então precisa sobreviver no stream.
+#[test]
+fn variante_legendada_pelo_colchete() {
+    let (entries, _) = parse(
+        "#EXTINF:-1 group-title=\"Series | Legendadas\",Origem [L] S01 E01\nhttp://host/o1\n",
+    );
+    assert_eq!(entries[0].variant.as_deref(), Some("Legendado"));
+}
+
+#[test]
+fn variante_dublada_pela_palavra() {
+    let (entries, _) = parse("#EXTINF:-1,Origem Dublado S01 E01\nhttp://host/o2\n");
+    assert_eq!(entries[0].variant.as_deref(), Some("Dublado"));
+}
+
+#[test]
+fn variante_legendada_pelo_grupo() {
+    let (entries, _) = parse(
+        "#EXTINF:-1 group-title=\"Filmes | Legendados\",Alguma Coisa\nhttp://host/a\n",
+    );
+    assert_eq!(entries[0].variant.as_deref(), Some("Legendado"));
+}
+
+// "Filmes | Nacionais" é produção brasileira, não áudio dublado: o grupo só
+// pode ser usado no sentido de legendado.
+#[test]
+fn grupo_nacional_nao_vira_dublado() {
+    let (entries, _) = parse(
+        "#EXTINF:-1 group-title=\"Filmes | Nacionais\",Pasárgada\nhttp://host/p\n",
+    );
+    assert_eq!(entries[0].variant, None);
+}
+
+// As duas versões precisam continuar no mesmo episódio, com dois streams.
+#[test]
+fn dublado_e_legendado_caem_no_mesmo_episodio() {
+    let (entries, _) = parse(concat!(
+        "#EXTINF:-1 group-title=\"Series | Globoplay\",Origem S01 E01\nhttp://host/dub\n",
+        "#EXTINF:-1 group-title=\"Series | Legendadas\",Origem [L] S01 E01\nhttp://host/leg\n",
+    ));
+    assert_eq!(entries[0].episode_id(), entries[1].episode_id());
+    assert_eq!(entries[0].variant, None);
+    assert_eq!(entries[1].variant.as_deref(), Some("Legendado"));
+}

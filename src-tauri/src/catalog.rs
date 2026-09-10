@@ -91,6 +91,8 @@ pub struct StreamRef {
     pub quality: Option<String>,
     pub source_label: String,
     pub channel_number: Option<i64>,
+    /// "Dublado"/"Legendado" quando a lista marca; `None` quando não dá para saber.
+    pub variant: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -273,7 +275,7 @@ pub fn page(
 fn streams_for(conn: &Connection, owner_id: &str, owner_kind: &str) -> Result<Vec<StreamRef>, String> {
     let mut statement = conn
         .prepare(
-            "SELECT s.id, s.url, s.quality, src.label, s.channel_number
+            "SELECT s.id, s.url, s.quality, src.label, s.channel_number, s.variant
              FROM streams s JOIN sources src ON src.id = s.source_id
              WHERE s.owner_id = ?1 AND s.owner_kind = ?2
              ORDER BY src.added_at, s.id",
@@ -286,6 +288,7 @@ fn streams_for(conn: &Connection, owner_id: &str, owner_kind: &str) -> Result<Ve
                 url: row.get(1)?,
                 quality: row.get(2)?,
                 source_label: row.get(3)?,
+                variant: row.get(5)?,
                 channel_number: row.get(4)?,
             })
         })

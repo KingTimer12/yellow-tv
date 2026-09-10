@@ -8,7 +8,7 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE sources(
@@ -106,6 +106,14 @@ fn prepare(conn: &Connection) -> Result<(), String> {
     .map_err(|error| format!("não foi possível configurar o banco: {error}"))
 }
 
+/// v2: rótulo de variante do stream ("Dublado", "Legendado"). Vem do nome da
+/// linha na lista, que `ids::normalize` descarta ao montar o título — sem
+/// guardar aqui, duas versões do mesmo episódio ficam indistinguíveis.
+const MIGRATION_V2: &str = r#"
+ALTER TABLE streams ADD COLUMN variant TEXT;
+PRAGMA user_version = 2;
+"#;
+
 fn migrate(conn: &Connection) -> Result<(), String> {
     let current: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -120,9 +128,15 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         ));
     }
 
-    // Só existe a v1; migrações futuras entram aqui como blocos condicionais.
-    conn.execute_batch(MIGRATION_V1)
-        .map_err(|error| format!("migração v1 falhou: {error}"))
+    if current < 1 {
+        conn.execute_batch(MIGRATION_V1)
+            .map_err(|error| format!("migração v1 falhou: {error}"))?;
+    }
+    if current < 2 {
+        conn.execute_batch(MIGRATION_V2)
+            .map_err(|error| format!("migração v2 falhou: {error}"))?;
+    }
+    Ok(())
 }
 
 pub fn open(path: &Path) -> Result<Connection, String> {

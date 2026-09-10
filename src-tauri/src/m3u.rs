@@ -40,6 +40,11 @@ pub struct Entry {
     pub group_name: Option<String>,
     pub quality: Option<String>,
     pub channel_number: Option<i64>,
+    /// "Dublado" ou "Legendado", quando a lista marca. `ids::normalize` joga
+    /// essas marcas fora ao montar o título — de propósito, para que as duas
+    /// versões caiam no mesmo item — então o rótulo tem que ser guardado aqui
+    /// ou não há como distinguir os dois streams depois.
+    pub variant: Option<String>,
     pub url: String,
 }
 
@@ -65,6 +70,15 @@ pub struct Outcome {
     pub parsed: usize,
     pub discarded: usize,
 }
+
+/// Marcas de versão legendada. "l" entra porque "[L]" é a convenção dominante
+/// nas listas em português.
+const LEGENDADO_TOKENS: &[&str] = &[
+    "l", "leg", "legendado", "legendada", "legendados", "legendadas", "sub", "subbed",
+];
+/// Marcas de versão dublada. Sem "n" solto: letra única gera falso positivo
+/// demais em título.
+const DUBLADO_TOKENS: &[&str] = &["dub", "dublado", "dublada", "dubladas", "dublados"];
 
 const QUALITY_TOKENS: &[&str] = &[
     "4K", "8K", "UHD", "FHD", "HD", "SD", "H265", "H264", "HEVC", "1080P", "720P", "2160P",
@@ -140,6 +154,38 @@ fn attr<'a>(attrs: &'a [(String, String)], key: &str) -> Option<&'a str> {
         .find(|(name, _)| name == key)
         .map(|(_, value)| value.as_str())
         .filter(|value| !value.is_empty())
+}
+
+/// Minúsculas, sem acento, tudo que não é alfanumérico vira espaço. Colchetes
+/// e parênteses viram separador, então "[L]" sai como o token "l".
+fn fold(value: &str) -> String {
+    value
+        .to_lowercase()
+        .nfd()
+        .filter(|character| !matches!(*character, '\u{0300}'..='\u{036f}'))
+        .map(|character| if character.is_alphanumeric() { character } else { ' ' })
+        .collect()
+}
+
+/// Versão do áudio, quando a lista marca.
+///
+/// O nome manda. O grupo só é consultado para o sinal de legendado ("Series |
+/// Legendadas"): no sentido oposto ele mente, porque "Filmes | Nacionais" quer
+/// dizer produção brasileira, não áudio dublado.
+fn detect_variant(name: &str, group: Option<&str>) -> Option<String> {
+    for token in fold(name).split_whitespace() {
+        if LEGENDADO_TOKENS.contains(&token) {
+            return Some("Legendado".to_owned());
+        }
+        if DUBLADO_TOKENS.contains(&token) {
+            return Some("Dublado".to_owned());
+        }
+    }
+    let group = group?;
+    fold(group)
+        .split_whitespace()
+        .any(|token| LEGENDADO_TOKENS.contains(&token))
+        .then(|| "Legendado".to_owned())
 }
 
 /// Marca de episódio no nome. Devolve `(temporada, episódio, título da série)`.
@@ -339,6 +385,7 @@ fn build(attrs: Vec<(String, String)>, name: String, url: String) -> Entry {
     // Tokens de qualidade podem aparecer antes ou depois da marca de episódio,
     // então são removidos do nome inteiro antes de procurar a marca.
     let (quality, clean) = strip_quality(&name);
+    let variant = detect_variant(&name, group_name.as_deref());
 
     // Regra 1: marca de episódio manda, mesmo em grupo de canal.
     if let Some((season, episode, head)) = series_marks(&clean) {
@@ -356,6 +403,7 @@ fn build(attrs: Vec<(String, String)>, name: String, url: String) -> Entry {
             group_name,
             quality,
             channel_number: None,
+            variant,
             url,
         };
     }
@@ -375,6 +423,7 @@ fn build(attrs: Vec<(String, String)>, name: String, url: String) -> Entry {
             group_name,
             quality,
             channel_number,
+            variant,
             url,
         };
     }
@@ -394,6 +443,7 @@ fn build(attrs: Vec<(String, String)>, name: String, url: String) -> Entry {
         group_name,
         quality,
         channel_number: None,
+        variant,
         url,
     }
 }
