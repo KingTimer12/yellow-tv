@@ -1,18 +1,20 @@
 import { useSearchParams } from "@solidjs/router";
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import ChannelList from "~/components/ChannelList";
 import ChannelSkeleton from "~/components/ChannelSkeleton";
 import { Search, StarOutline } from "~/components/Icons";
-import { GROUPS, matches, parseQuery, useChannels } from "~/lib/channels";
-import { favoriteIds, hydrateStores, recentIds } from "~/lib/store";
+import { matches, parseQuery, useChannels } from "~/lib/channels";
+import { fetchContinueWatching, fetchFavorites } from "~/lib/api";
 
 export default function Browse() {
   const list = useChannels();
   const [params, setParams] = useSearchParams<{ q?: string; g?: string }>();
   const [search, setSearch] = createSignal<HTMLInputElement>();
 
+  const [favoriteItems, { refetch: refetchFavorites }] = createResource(fetchFavorites);
+  const favoriteIds = () => new Set((favoriteItems() ?? []).map(item => item.id));
+
   onMount(() => {
-    hydrateStores();
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "/" || event.metaKey || event.ctrlKey) return;
       const active = document.activeElement?.tagName;
@@ -28,16 +30,24 @@ export default function Browse() {
   const group = () => params.g ?? "Todos";
   const query = () => params.q ?? "";
 
+  const groups = createMemo(() => [
+    "Todos",
+    ...[...new Set(all().map(channel => channel.group).filter(Boolean))].sort(),
+  ] as string[]);
+
   const counts = createMemo(() => {
     const tally = new Map<string, number>();
-    for (const channel of all()) tally.set(channel.group, (tally.get(channel.group) ?? 0) + 1);
+    for (const channel of all()) {
+      if (!channel.group) continue;
+      tally.set(channel.group, (tally.get(channel.group) ?? 0) + 1);
+    }
     return tally;
   });
 
   const filtered = createMemo(() => {
     const terms = parseQuery(query());
     const active = group();
-    const favorites = new Set(favoriteIds());
+    const favorites = favoriteIds();
     return all().filter(channel => {
       if (active === "favoritos" && !favorites.has(channel.id)) return false;
       if (active !== "Todos" && active !== "favoritos" && channel.group !== active) return false;
@@ -45,12 +55,13 @@ export default function Browse() {
     });
   });
 
+  const [recent] = createResource(() => fetchContinueWatching(8));
   const continueWatching = createMemo(() => {
     const byId = new Map(all().map(channel => [channel.id, channel]));
-    return recentIds()
-      .map(id => byId.get(id))
-      .filter((channel): channel is NonNullable<typeof channel> => Boolean(channel))
-      .slice(0, 8);
+    return (recent() ?? [])
+      .filter(entry => entry.kind === "channel")
+      .map(entry => byId.get(entry.itemId))
+      .filter((channel): channel is NonNullable<typeof channel> => Boolean(channel));
   });
 
   return (
@@ -67,11 +78,11 @@ export default function Browse() {
               <StarOutline size={15} class="shrink-0" />
               <span>Favoritos</span>
               <span class="ml-auto font-mono text-[0.7rem] tabular-nums text-paper/30">
-                {favoriteIds().length}
+                {favoriteIds().size}
               </span>
             </button>
           </li>
-          <For each={GROUPS}>
+          <For each={groups()}>
             {(name, index) => (
               <li class="anim-fade" style={{ "--i": Math.min(index() + 1, 14) }}>
                 <button
@@ -145,6 +156,8 @@ export default function Browse() {
                     ? "Sem favoritos ainda. Toque na estrela de um canal para salvá-lo aqui."
                     : "Nenhum canal com esse nome."
                 }
+                favoriteIds={favoriteIds()}
+                onToggle={refetchFavorites}
               />
             </Show>
           }

@@ -1,16 +1,19 @@
 import { A, useNavigate, useParams } from "@solidjs/router";
-import { createEffect, createMemo, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, onCleanup, onMount, Show } from "solid-js";
 import ChannelList from "~/components/ChannelList";
 import ChannelSkeleton from "~/components/ChannelSkeleton";
 import { ChevronLeft, ChevronRight, StarFilled, StarOutline } from "~/components/Icons";
 import Player from "~/components/Player";
+import SourcePicker from "~/components/SourcePicker";
 import { formatNumber, useChannels } from "~/lib/channels";
-import { hydrateStores, isFavorite, markWatched, toggleFavorite } from "~/lib/store";
+import { fetchFavorites, fetchItem, markWatched, toggleFavorite } from "~/lib/api";
 
 export default function Watch() {
   const params = useParams<{ id: string }>();
   const navigate = useNavigate();
   const list = useChannels();
+  const [source, setSource] = createSignal(0);
+  const [favoriteOverride, setFavoriteOverride] = createSignal<boolean>();
 
   const all = list.channels;
   const channel = createMemo(() => all().find(item => item.id === params.id));
@@ -21,6 +24,20 @@ export default function Watch() {
     return siblings.length > 1 ? siblings : all();
   });
 
+  const [detail] = createResource(() => params.id, id => fetchItem("canais", id));
+  const streams = () => detail()?.streams ?? [];
+
+  // A lista de favoritos serve só para o estado inicial; depois do primeiro
+  // toggle o signal local já reflete a verdade sem precisar recarregar.
+  const [favoritesList] = createResource(fetchFavorites);
+  const favorite = () =>
+    favoriteOverride() ?? (favoritesList()?.some(entry => entry.id === channel()?.id) ?? false);
+
+  createEffect(() => {
+    params.id;
+    setSource(0);
+  });
+
   const step = (delta: number) => {
     const list = neighbours();
     if (!list.length) return undefined;
@@ -29,7 +46,6 @@ export default function Watch() {
   };
 
   onMount(() => {
-    hydrateStores();
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const next =
@@ -47,7 +63,7 @@ export default function Watch() {
   });
 
   createEffect(() => {
-    if (channel()) markWatched(params.id);
+    if (channel()) void markWatched(params.id, "item", false);
   });
 
   return (
@@ -72,10 +88,25 @@ export default function Watch() {
         >
           {current => (
             <>
-              <Player src={current().url} title={current().title} poster={current().logo} />
+              <Show
+                when={streams()[source()]}
+                fallback={
+                  <div class="tuner-sweep relative grid aspect-video place-content-center bg-black text-center">
+                    <p class="font-mono text-sm text-paper/40">
+                      <Show when={!detail.loading} fallback={<>sintonizando<span class="anim-caret">_</span></>}>
+                        Nenhuma fonte disponível para este canal.
+                      </Show>
+                    </p>
+                  </div>
+                }
+              >
+                {stream => (
+                  <Player src={stream().url} title={current().title} poster={current().logo ?? undefined} />
+                )}
+              </Show>
               <div class="anim-reveal flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-edge px-4 py-4">
                 <span class="font-mono text-2xl tabular-nums text-amber [text-shadow:0_0_20px_rgb(255_209_26/0.35)]">
-                  {formatNumber(current().channelNumber)}
+                  {formatNumber(current().channelNumber ?? 0)}
                 </span>
                 <h1 class="font-display text-2xl font-bold tracking-tight text-paper">
                   {current().title}
@@ -91,15 +122,15 @@ export default function Watch() {
                 <div class="ml-auto flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => toggleFavorite(current().id)}
+                    onClick={async () => setFavoriteOverride(await toggleFavorite(current().id))}
                     class="press flex items-center gap-2 rounded-sm border border-edge px-3 py-2 text-sm text-paper/70 hover:border-amber hover:text-amber"
-                    classList={{ "border-amber/60 text-amber": isFavorite(current().id) }}
-                    aria-pressed={isFavorite(current().id)}
+                    classList={{ "border-amber/60 text-amber": favorite() }}
+                    aria-pressed={favorite()}
                   >
-                    <Show when={isFavorite(current().id)} fallback={<StarOutline size={16} />} keyed>
+                    <Show when={favorite()} fallback={<StarOutline size={16} />} keyed>
                       <StarFilled size={16} class="anim-star-pop" />
                     </Show>
-                    {isFavorite(current().id) ? "Nos favoritos" : "Salvar canal"}
+                    {favorite() ? "Nos favoritos" : "Salvar canal"}
                   </button>
                   <A
                     href={`/watch/${step(-1)?.id ?? current().id}`}
@@ -117,6 +148,7 @@ export default function Watch() {
                   </A>
                 </div>
               </div>
+              <SourcePicker streams={streams()} active={source()} onPick={setSource} />
               <p class="px-4 py-3 text-xs text-paper/35">
                 Use as setas{" "}
                 <kbd class="rounded-sm border border-edge px-1 font-mono">↑</kbd>{" "}

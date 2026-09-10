@@ -8,6 +8,8 @@ type ChannelListProps = {
   channels: Channel[];
   currentId?: string;
   empty?: string;
+  favoriteIds?: Set<string>;
+  onToggle?: () => void;
 };
 
 /** Renders the list in pages so 3.677 rows never hit the DOM at once. */
@@ -45,7 +47,14 @@ export default function ChannelList(props: ChannelListProps) {
     >
       <div>
         <For each={visible()}>
-          {channel => <ChannelRow channel={channel} current={channel.id === props.currentId} />}
+          {channel => (
+            <ChannelRow
+              channel={channel}
+              current={channel.id === props.currentId}
+              favorite={props.favoriteIds?.has(channel.id)}
+              onToggle={props.onToggle}
+            />
+          )}
         </For>
         <Show when={shown() < props.channels.length}>
           <div ref={setSentinel} class="p-6 text-center font-mono text-xs text-paper/30">
