@@ -25,18 +25,33 @@ export default function Setup() {
   const [error, setError] = createSignal<string>();
   const [lastAction, setLastAction] = createSignal<() => void>();
 
-  onMount(async () => {
-    // O `await` aqui faz a continuação retomar fora do owner reativo do
-    // Solid, então guardamos o owner antes de esperar e reanexamos o
-    // `onCleanup` com `runWithOwner` — senão o listener sobreviveria à
-    // navegação para fora de `/setup`.
+  onMount(() => {
+    // O `listen` é assíncrono e sua continuação retoma fora do owner
+    // reativo do Solid, então guardamos o owner antes de esperar e
+    // reanexamos o `onCleanup` com `runWithOwner` depois.
     const owner = getOwner();
+    // Se `Setup` desmontar antes da promise resolver, o owner já estará
+    // descartado quando o handle chegar — `onCleanup` nesse owner nunca
+    // rodaria de novo e o listener ficaria vivo para sempre. Por isso
+    // marcamos o descarte com uma flag registrada de forma síncrona.
+    let disposed = false;
+    onCleanup(() => {
+      disposed = true;
+    });
+
     // O import roda em Rust e vai avisando quantas entradas já entraram.
-    const stop = await listen<{ sourceId: number; parsed: number }>(
+    void listen<{ sourceId: number; parsed: number }>(
       "import:progress",
       event => setParsed(event.payload.parsed),
-    );
-    runWithOwner(owner, () => onCleanup(stop));
+    ).then(stop => {
+      if (disposed) {
+        // Chegou depois do desmonte: encerra o listener na hora, em vez
+        // de tentar reanexar um cleanup que nunca mais vai disparar.
+        stop();
+        return;
+      }
+      runWithOwner(owner, () => onCleanup(stop));
+    });
   });
 
   const run = async (task: () => Promise<ImportReport>) => {
