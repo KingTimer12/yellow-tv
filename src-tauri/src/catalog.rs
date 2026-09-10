@@ -60,6 +60,10 @@ pub struct CatalogItem {
     /// 0.0 a 1.0; 0.0 quando não há progresso.
     pub percent: f64,
     pub completed: bool,
+    /// "T1 E5" na fileira "Continuar assistindo". Só o board preenche: o
+    /// progresso de uma série mora nos episódios, não no item da série, então
+    /// não sai de nenhuma consulta de catálogo.
+    pub progress_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -159,6 +163,7 @@ fn read_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<CatalogItem> {
             .map(|value| (position / value).clamp(0.0, 1.0))
             .unwrap_or(0.0),
         completed: row.get::<_, i64>(11)? != 0,
+        progress_label: None,
     })
 }
 
@@ -452,9 +457,30 @@ pub fn board(conn: &Connection) -> Result<Vec<Row>, String> {
 
     let continuing = library::continue_watching(conn, ROW_LIMIT)?;
     if !continuing.is_empty() {
-        let ids: Vec<String> = continuing.iter().map(|entry| entry.item_id.clone()).collect();
+        // Dedup por id antes da consulta: três episódios da mesma série dão três
+        // linhas em `progress`, todas apontando para o mesmo item. `dedup` só
+        // removeria repetições vizinhas, e um filme assistido no meio das duas
+        // sessões da série já basta para separá-las.
+        let mut seen = std::collections::HashSet::new();
+        let ids: Vec<String> = continuing
+            .iter()
+            .map(|entry| entry.item_id.clone())
+            .filter(|id| seen.insert(id.clone()))
+            .collect();
         let mut items = by_ids(conn, &ids)?;
-        items.dedup_by(|a, b| a.id == b.id);
+        // O progresso de uma série está no episódio, não no item: sem este
+        // repasse o cartão da série viria sempre zerado e sem dizer onde parou.
+        for item in items.iter_mut() {
+            let Some(entry) = continuing.iter().find(|entry| entry.item_id == item.id) else {
+                continue;
+            };
+            item.percent = entry.percent;
+            item.completed = false;
+            item.progress_label = match (entry.season, entry.episode) {
+                (Some(season), Some(episode)) => Some(format!("T{season} E{episode}")),
+                _ => None,
+            };
+        }
         rows.push(Row {
             key: "continue".into(),
             title: "Continuar assistindo".into(),

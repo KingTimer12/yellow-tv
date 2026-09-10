@@ -36,6 +36,8 @@ export type CatalogItem = {
   /** 0 a 1 */
   percent: number;
   completed: boolean;
+  /** "T1 E5"; só a fileira "Continuar assistindo" preenche. */
+  progressLabel: string | null;
 };
 
 export type GroupCount = { name: string; count: number };

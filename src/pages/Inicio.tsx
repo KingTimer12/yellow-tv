@@ -1,4 +1,5 @@
 import { createResource, For, Show } from "solid-js";
+import LazyRow from "~/components/LazyRow";
 import PosterRow from "~/components/PosterRow";
 import PosterSkeleton from "~/components/PosterSkeleton";
 import { fetchBoard } from "~/lib/api";
@@ -31,10 +32,19 @@ export default function Inicio() {
               </div>
             }
           >
+            {/* As duas primeiras fileiras montam de imediato — são as que
+                aparecem sem rolar. O resto espera chegar perto da viewport. */}
             <For each={rows()}>
               {(row, index) => (
                 <div style={{ "--i": Math.min(index(), 8) }}>
-                  <PosterRow title={row.title} items={row.items} />
+                  <Show
+                    when={index() >= 2}
+                    fallback={<PosterRow title={row.title} items={row.items} />}
+                  >
+                    <LazyRow>
+                      <PosterRow title={row.title} items={row.items} />
+                    </LazyRow>
+                  </Show>
                 </div>
               )}
             </For>

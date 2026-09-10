@@ -52,10 +52,23 @@ export default function PosterCard(props: { item: CatalogItem }) {
           </span>
         </Show>
 
-        <Show when={item().kind === "series" && item().episodeCount > 0}>
-          <span class="absolute bottom-0 right-0 rounded-tl-sm bg-ink/85 px-1.5 py-0.5 font-mono text-[0.65rem] tabular-nums text-amber backdrop-blur-sm">
-            {item().seasons}T · {item().episodeCount}ep
-          </span>
+        {/* O rótulo de progresso ganha do contador de temporadas: saber onde
+            você parou vale mais que saber o tamanho da série. */}
+        <Show
+          when={item().progressLabel}
+          fallback={
+            <Show when={item().kind === "series" && item().episodeCount > 0}>
+              <span class="absolute bottom-0 right-0 rounded-tl-sm bg-ink/85 px-1.5 py-0.5 font-mono text-[0.65rem] tabular-nums text-amber backdrop-blur-sm">
+                {item().seasons}T · {item().episodeCount}ep
+              </span>
+            </Show>
+          }
+        >
+          {label => (
+            <span class="absolute bottom-0 right-0 rounded-tl-sm bg-amber px-1.5 py-0.5 font-mono text-[0.65rem] font-bold tabular-nums text-ink">
+              {label()}
+            </span>
+          )}
         </Show>
 
         <Show when={started()}>
