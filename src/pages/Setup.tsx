@@ -1,8 +1,8 @@
-import { useNavigate } from "@solidjs/router";
+import { A, useNavigate } from "@solidjs/router";
 import { createSignal, For, getOwner, onCleanup, onMount, runWithOwner, Show } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Play, Search } from "~/components/Icons";
+import { ChevronLeft, Play, Search } from "~/components/Icons";
 import {
   addSource,
   removeSource,
@@ -96,6 +96,18 @@ export default function Setup() {
 
   return (
     <main class="relative z-10 mx-auto max-w-2xl px-4 py-10">
+      {/* Com lista já importada esta página deixa de ser onboarding e vira
+          gerenciamento de fontes: sem esta saída não haveria como voltar,
+          porque a barra de navegação fica escondida em /setup. */}
+      <Show when={list.sources().length}>
+        <A
+          href="/"
+          class="press mb-6 inline-flex items-center gap-1.5 text-sm text-paper/50 hover:text-amber"
+        >
+          <ChevronLeft size={16} />
+          Voltar ao catálogo
+        </A>
+      </Show>
       <h1 class="anim-reveal font-display text-3xl font-extrabold tracking-[-0.03em] text-paper">
         Sua lista, seu catálogo
       </h1>

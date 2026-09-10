@@ -91,3 +91,13 @@ export const Library = (props: IconProps) =>
       <path d="M3 4h4v16H3zM9 4h4v16H9zM16 5l4 14" />
     </>,
   );
+
+export const Sliders = (props: IconProps) =>
+  base(
+    props,
+    <>
+      <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="10" cy="17" r="2" />
+    </>,
+  );

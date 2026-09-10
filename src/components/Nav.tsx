@@ -1,6 +1,6 @@
 import { A, useLocation } from "@solidjs/router";
 import { For } from "solid-js";
-import { Film, Library, Play, Signal, Stack, Tv } from "./Icons";
+import { Film, Library, Play, Signal, Sliders, Stack, Tv } from "./Icons";
 
 const LINKS = [
   { href: "/", label: "Início", icon: Play, exact: true },
@@ -8,6 +8,7 @@ const LINKS = [
   { href: "/series", label: "Séries", icon: Stack, exact: false },
   { href: "/biblioteca", label: "Biblioteca", icon: Library, exact: false },
   { href: "/canais", label: "Canais", icon: Tv, exact: false },
+  { href: "/setup", label: "Listas", icon: Sliders, exact: false },
 ] as const;
 
 export default function Nav() {
