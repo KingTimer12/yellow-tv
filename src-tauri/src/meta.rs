@@ -109,14 +109,16 @@ impl Tmdb {
         let response = request
             .send()
             .await
-            .map_err(|error| format!("falha ao falar com o TMDB: {error}"))?;
+            // `error.without_url()` é obrigatório: a URL carrega a `api_key` v3 na
+            // query e o Display do erro a colaria na mensagem mostrada ao usuário.
+            .map_err(|error| format!("falha ao falar com o TMDB: {}", error.without_url()))?;
         if !response.status().is_success() {
             return Err(format!("TMDB respondeu {} em {path}", response.status()));
         }
         response
             .json()
             .await
-            .map_err(|error| format!("resposta do TMDB ilegível: {error}"))
+            .map_err(|error| format!("resposta do TMDB ilegível: {}", error.without_url()))
     }
 
     async fn lookup(&self, key: &str, title: &str, kind: &str, year: Option<i64>) -> Result<Meta, String> {
