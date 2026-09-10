@@ -196,3 +196,42 @@ fn by_ids_preserva_a_ordem_pedida() {
     let got: Vec<String> = items.into_iter().map(|item| item.id).collect();
     assert_eq!(got, reversed);
 }
+
+// --- Correções da revisão final ---
+
+/// Retomada de episódio: sem `position_secs` na linha, `Serie.tsx` não tem o
+/// que passar como `startAt` e o episódio sempre recomeçava do zero.
+#[test]
+fn episodio_expoe_a_posicao_salva_para_retomar() {
+    let conn = banco();
+    let series_id = conn
+        .query_row("SELECT id FROM items WHERE kind = 'series'", [], |row| row.get::<_, String>(0))
+        .unwrap();
+    let primeiro = catalog::episodes(&conn, &series_id).unwrap().episodes[0]
+        .id
+        .clone();
+    library::set_progress(&conn, &primeiro, "episode", 420.0, Some(1400.0)).unwrap();
+
+    let detail = catalog::episodes(&conn, &series_id).unwrap();
+    assert_eq!(detail.episodes[0].position_secs, 420.0);
+    assert!((detail.episodes[0].percent - 0.3).abs() < 1e-6);
+    assert_eq!(
+        detail.episodes[1].position_secs, 0.0,
+        "sem progresso, a posição é zero"
+    );
+}
+
+/// I11: canais vêm em uma página só, senão a lista do player dispara dezenas de
+/// `catalog_page` e cada uma refaz o `GROUP BY group_name` inteiro.
+#[test]
+fn canais_cabem_em_uma_unica_pagina() {
+    let conn = banco();
+    let page = catalog::page(&conn, catalog::Kind::Channel, "", None, 0, false).unwrap();
+    assert_eq!(page.page_size, catalog::CHANNEL_PAGE_SIZE);
+    assert!(page.page_size > catalog::PAGE_SIZE);
+    assert_eq!(
+        (page.total as f64 / page.page_size as f64).ceil() as i64,
+        1,
+        "uma página basta"
+    );
+}

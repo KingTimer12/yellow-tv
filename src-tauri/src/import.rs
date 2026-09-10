@@ -93,21 +93,69 @@ pub fn upsert_source(conn: &Connection, url: &str, label: &str, kind: &str) -> R
     get_source(conn, id)
 }
 
+/// Usado antes de um `upsert_source` para saber se a fonte já existia: só uma
+/// fonte recém-criada pode ser desfeita quando o primeiro import falha.
+pub fn find_source_by_url(conn: &Connection, url: &str) -> Result<Option<Source>, String> {
+    let sql = format!("SELECT {SOURCE_COLUMNS} FROM sources WHERE url = ?1");
+    conn.query_row(&sql, [url.trim()], read_source)
+        .optional()
+        .map_err(stringify)
+}
+
+/// Primeira metade de "adicionar lista": grava a fonte e diz se ela nasceu
+/// agora. O download acontece entre esta chamada e `finish_add`, fora do lock.
+pub fn begin_add(
+    conn: &Connection,
+    url: &str,
+    label: &str,
+    kind: &str,
+) -> Result<(Source, bool), String> {
+    let existed = find_source_by_url(conn, url)?.is_some();
+    let source = upsert_source(conn, url, label, kind)?;
+    Ok((source, !existed))
+}
+
+/// Segunda metade: importa e, se a fonte tinha acabado de ser criada e o import
+/// falhou (download ou parse), desfaz a linha. Sem isso a fonte órfã deixaria
+/// `list_sources` não-vazio para sempre e o portão de primeira execução
+/// (`/setup`) nunca mais apareceria — o usuário ficaria num Início vazio.
+/// Uma fonte que já existia e está só re-sincronizando nunca é removida.
+pub fn finish_add<R: BufRead>(
+    conn: &mut Connection,
+    source: &Source,
+    was_new: bool,
+    reader: Result<R, String>,
+    progress: &mut dyn FnMut(usize),
+) -> Result<ImportReport, String> {
+    let result = reader.and_then(|reader| ingest(conn, source.id, reader, progress));
+    if result.is_err() && was_new {
+        let _ = remove_source(conn, source.id);
+    }
+    result
+}
+
 pub fn remove_source(conn: &mut Connection, id: i64) -> Result<(), String> {
     let transaction = conn.transaction().map_err(stringify)?;
     transaction
         .execute("DELETE FROM sources WHERE id = ?1", [id])
         .map_err(stringify)?;
-    // Itens sem nenhum stream não são mais alcançáveis; o progresso deles fica.
-    transaction
-        .execute(
-            "DELETE FROM items WHERE id NOT IN (SELECT owner_id FROM streams WHERE owner_kind = 'item')
-             AND id NOT IN (SELECT series_id FROM episodes
-                            WHERE id IN (SELECT owner_id FROM streams WHERE owner_kind = 'episode'))",
-            [],
-        )
-        .map_err(stringify)?;
+    prune_orphan_items(&transaction)?;
     transaction.commit().map_err(stringify)
+}
+
+/// Itens sem nenhum stream não são mais alcançáveis; o progresso deles fica
+/// (`progress` não tem chave estrangeira). Roda tanto ao remover uma fonte
+/// quanto ao fim de um import: uma lista re-sincronizada que perdeu títulos
+/// deixaria fantasmas com Play desabilitado e contagem de grupo inflada.
+fn prune_orphan_items(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM items WHERE id NOT IN (SELECT owner_id FROM streams WHERE owner_kind = 'item')
+         AND id NOT IN (SELECT series_id FROM episodes
+                        WHERE id IN (SELECT owner_id FROM streams WHERE owner_kind = 'episode'))",
+        [],
+    )
+    .map_err(stringify)?;
+    Ok(())
 }
 
 pub fn ingest<R: BufRead>(
@@ -158,9 +206,16 @@ pub fn ingest<R: BufRead>(
             )
             .map_err(stringify)?;
 
+        let mut seen = 0usize;
         let outcome = m3u::parse_each(reader, |entry| {
             if failure.is_some() {
                 return;
+            }
+            // O contador precisa correr durante o parse: emitido só no fim, a UI
+            // veria o número saltar de 0 para o total em um único quadro.
+            seen += 1;
+            if seen % PROGRESS_EVERY == 0 {
+                progress(seen);
             }
             let item_id = entry.item_id();
             let result = insert_item
@@ -228,13 +283,7 @@ pub fn ingest<R: BufRead>(
         return Err("nenhuma entrada reconhecida na lista".into());
     }
 
-    // O contador roda aqui porque `parse_each` já terminou; para listas
-    // grandes a UI recebe marcos a cada bloco.
-    let mut reported = 0usize;
-    while reported + PROGRESS_EVERY < outcome.parsed {
-        reported += PROGRESS_EVERY;
-        progress(reported);
-    }
+    // Marco final: fecha a contagem no total real de entradas reconhecidas.
     progress(outcome.parsed);
 
     // Streams de episódio contam pela série dona, não por episódio: o que
@@ -255,6 +304,10 @@ pub fn ingest<R: BufRead>(
             params![now, distinct, source_id],
         )
         .map_err(stringify)?;
+
+    // Mesma limpeza de `remove_source`, dentro da mesma transação: títulos que
+    // sumiram da lista re-sincronizada não podem sobreviver sem stream.
+    prune_orphan_items(&transaction)?;
 
     transaction.commit().map_err(stringify)?;
 

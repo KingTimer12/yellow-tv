@@ -11,6 +11,10 @@ use crate::ids;
 use crate::library::{self, Progress};
 
 pub const PAGE_SIZE: i64 = 60;
+/// Canais são consumidos como lista única (a barra lateral do player precisa de
+/// todos), e cada página repetia o `GROUP BY group_name` inteiro. Uma página só
+/// cobre qualquer lista real e o agregado roda uma vez.
+pub const CHANNEL_PAGE_SIZE: i64 = 10_000;
 const RELATED_LIMIT: i64 = 18;
 const ROW_LIMIT: i64 = 20;
 const BOARD_GROUP_ROWS: usize = 8;
@@ -102,6 +106,8 @@ pub struct EpisodeRow {
     pub episode: i64,
     pub title: Option<String>,
     pub streams: Vec<StreamRef>,
+    /// Segundos salvos: é daqui que o front tira o `startAt` do episódio.
+    pub position_secs: f64,
     pub percent: f64,
     pub completed: bool,
 }
@@ -172,6 +178,14 @@ fn fts_query(query: &str) -> Option<String> {
     }
 }
 
+/// Tamanho de página por tipo: ver `CHANNEL_PAGE_SIZE`.
+pub fn page_size(kind: Kind) -> i64 {
+    match kind {
+        Kind::Channel => CHANNEL_PAGE_SIZE,
+        _ => PAGE_SIZE,
+    }
+}
+
 pub fn page(
     conn: &Connection,
     kind: Kind,
@@ -181,6 +195,7 @@ pub fn page(
     unwatched_only: bool,
 ) -> Result<CatalogPage, String> {
     let page = page.max(0);
+    let page_size = page_size(kind);
     let mut clauses = vec!["i.kind = ?".to_owned()];
     let mut binds: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(kind.as_str().to_owned())];
 
@@ -208,8 +223,8 @@ pub fn page(
     let mut statement = conn
         .prepare(&format!(
             "SELECT {ITEM_COLUMNS} {ITEM_JOIN} WHERE {where_clause}
-             ORDER BY i.title LIMIT {PAGE_SIZE} OFFSET {}",
-            page * PAGE_SIZE
+             ORDER BY i.title LIMIT {page_size} OFFSET {}",
+            page * page_size
         ))
         .map_err(stringify)?;
     let items = statement
@@ -244,7 +259,7 @@ pub fn page(
     Ok(CatalogPage {
         total,
         page,
-        page_size: PAGE_SIZE,
+        page_size,
         items,
         groups,
     })
@@ -344,6 +359,7 @@ pub fn episodes(conn: &Connection, series_id: &str) -> Result<SeriesEpisodes, St
                 row.get::<_, i64>(1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, Option<String>>(3)?,
+                position,
                 duration
                     .filter(|value| *value > 0.0)
                     .map(|value| (position / value).clamp(0.0, 1.0))
@@ -356,13 +372,14 @@ pub fn episodes(conn: &Connection, series_id: &str) -> Result<SeriesEpisodes, St
         .map_err(stringify)?;
 
     let mut episodes = Vec::with_capacity(partial.len());
-    for (id, season, episode, episode_title, percent, completed) in partial {
+    for (id, season, episode, episode_title, position_secs, percent, completed) in partial {
         episodes.push(EpisodeRow {
             streams: streams_for(conn, &id, "episode")?,
             id,
             season,
             episode,
             title: episode_title,
+            position_secs,
             percent,
             completed,
         });

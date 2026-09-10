@@ -178,3 +178,127 @@ fn list_sources_devolve_o_que_foi_adicionado() {
     assert_eq!(sources.len(), 2);
     assert!(sources.iter().any(|source| source.kind == "file"));
 }
+
+// --- Correções da revisão final ---
+
+/// C2: uma fonte criada agora cujo primeiro import falha não pode sobreviver,
+/// senão `list_sources` fica não-vazio para sempre e o portão de `/setup` some.
+#[test]
+fn fonte_nova_some_quando_o_primeiro_import_falha() {
+    let mut conn = db::open_memory().unwrap();
+    let (source, was_new) = import::begin_add(&conn, "http://ruim", "Ruim", "url").unwrap();
+    assert!(was_new);
+
+    let vazia: Result<Cursor<String>, String> = Ok(Cursor::new("#EXTM3U\n".to_owned()));
+    let erro = import::finish_add(&mut conn, &source, was_new, vazia, &mut |_| {});
+    assert!(erro.is_err());
+    assert!(
+        import::list_sources(&conn).unwrap().is_empty(),
+        "a fonte órfã precisa ser removida"
+    );
+}
+
+/// C2: falha de download também desfaz a fonte recém-criada.
+#[test]
+fn fonte_nova_some_quando_o_download_falha() {
+    let mut conn = db::open_memory().unwrap();
+    let (source, was_new) = import::begin_add(&conn, "http://offline", "Off", "url").unwrap();
+    let reader: Result<Cursor<String>, String> = Err("não foi possível baixar a lista".into());
+    assert!(import::finish_add(&mut conn, &source, was_new, reader, &mut |_| {}).is_err());
+    assert!(import::list_sources(&conn).unwrap().is_empty());
+}
+
+/// C2: re-sincronizar uma fonte que já existia nunca pode apagá-la, mesmo que o
+/// import falhe.
+#[test]
+fn fonte_existente_sobrevive_a_um_import_que_falha() {
+    let mut conn = db::open_memory().unwrap();
+    ingest(&mut conn, "http://a", LISTA_A);
+
+    let (source, was_new) = import::begin_add(&conn, "http://a", "Teste", "url").unwrap();
+    assert!(!was_new, "a fonte já existia");
+    let vazia: Result<Cursor<String>, String> = Ok(Cursor::new("#EXTM3U\n".to_owned()));
+    assert!(import::finish_add(&mut conn, &source, was_new, vazia, &mut |_| {}).is_err());
+    assert_eq!(import::list_sources(&conn).unwrap().len(), 1);
+}
+
+/// I10: um re-sync que perdeu títulos não pode deixar itens sem stream para
+/// trás — eles apareceriam com Play desabilitado e inflando a contagem do grupo.
+#[test]
+fn resync_remove_itens_que_sumiram_da_lista() {
+    let mut conn = db::open_memory().unwrap();
+    ingest(&mut conn, "http://a", LISTA_A);
+    let antes: i64 = conn
+        .query_row("SELECT count(*) FROM items", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(antes, 3, "filme, série e canal");
+
+    // A mesma fonte volta só com o canal.
+    let menor = "#EXTM3U\n#EXTINF:-1 tvg-chno=\"12\",Globo SP HD\nhttp://a/globo\n";
+    ingest(&mut conn, "http://a", menor);
+
+    let restantes: Vec<String> = conn
+        .prepare("SELECT id FROM items ORDER BY id")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(restantes.len(), 1, "só o canal continua alcançável");
+}
+
+/// I10: o item que sumiu de uma lista mas continua em outra permanece.
+#[test]
+fn resync_preserva_item_que_outra_lista_ainda_serve() {
+    let mut conn = db::open_memory().unwrap();
+    ingest(&mut conn, "http://a", LISTA_A);
+    ingest(&mut conn, "http://b", LISTA_B);
+
+    let so_canal = "#EXTM3U\n#EXTINF:-1 tvg-chno=\"12\",Globo SP HD\nhttp://a/globo\n";
+    ingest(&mut conn, "http://a", so_canal);
+
+    let duna: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM items WHERE kind = 'movie'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(duna, 1, "a lista B ainda serve Duna");
+}
+
+/// I5: o progresso precisa chegar durante o parse, não como rajada no fim.
+#[test]
+fn progresso_e_emitido_durante_o_parse() {
+    let mut conn = db::open_memory().unwrap();
+    let source = import::upsert_source(&conn, "http://grande", "Grande", "url").unwrap();
+
+    let mut lista = String::from("#EXTM3U\n");
+    for index in 0..1200 {
+        lista.push_str(&format!(
+            "#EXTINF:-1 tvg-chno=\"{index}\",Canal {index}\nhttp://grande/{index}\n"
+        ));
+    }
+
+    // O sink registra quantas entradas já estavam no banco quando cada marco
+    // chegou: com a emissão em rajada no fim, todos veriam a lista inteira.
+    let mut marcos: Vec<usize> = Vec::new();
+    let report = {
+        let marcos = &mut marcos;
+        import::ingest(
+            &mut conn,
+            source.id,
+            Cursor::new(lista),
+            &mut |parsed| marcos.push(parsed),
+        )
+        .unwrap()
+    };
+
+    assert_eq!(report.parsed, 1200);
+    assert!(
+        marcos.len() >= 3,
+        "esperado um marco a cada bloco, veio {marcos:?}"
+    );
+    assert_eq!(marcos[0], 500, "o primeiro marco é parcial, não o total");
+    assert_eq!(marcos.last().copied(), Some(1200));
+}

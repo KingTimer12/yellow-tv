@@ -81,7 +81,10 @@ fn run_import(
     })
 }
 
-#[tauri::command]
+/// `async` aqui é o atributo do Tauri: mantém a função síncrona (o `Connection`
+/// não é `Send` e nenhum guard cruza `await`) mas tira o download e o parse da
+/// thread principal, que é a mesma da WebView.
+#[tauri::command(async)]
 fn add_source(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -92,11 +95,18 @@ fn add_source(
     let label = label
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| default_label(&url_or_path));
-    let source = {
+    let (source, was_new) = {
         let conn = state.conn()?;
-        import::upsert_source(&conn, &url_or_path, &label, &kind)?
+        import::begin_add(&conn, &url_or_path, &label, &kind)?
     };
-    run_import(&app, &state, source)
+    // O download roda sem o lock; só depois o banco é travado para a ingestão.
+    let reader = open_source(&source.url, &source.kind);
+    let source_id = source.id;
+    let handle = app.clone();
+    let mut conn = state.conn()?;
+    import::finish_add(&mut conn, &source, was_new, reader, &mut move |parsed| {
+        let _ = handle.emit("import:progress", ImportProgress { source_id, parsed });
+    })
 }
 
 /// "http://host/get.php?..." vira "host"; um arquivo vira o nome do arquivo.
@@ -109,7 +119,7 @@ fn default_label(url_or_path: &str) -> String {
         .to_owned()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn sync_source(
     app: AppHandle,
     state: State<'_, AppState>,
