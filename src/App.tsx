@@ -1,4 +1,4 @@
-import { Navigate, Route, Router } from "@solidjs/router";
+import { Navigate, Route, Router, useLocation } from "@solidjs/router";
 import { Show, Suspense } from "solid-js";
 import Nav from "~/components/Nav";
 import Biblioteca from "~/pages/Biblioteca";
@@ -16,7 +16,8 @@ import "./App.css";
 
 /**
  * Sem nenhuma lista adicionada não existe catálogo, então tudo cai em `/setup`
- * até a primeira importação terminar.
+ * até a primeira importação terminar. Toda rota fora de `/setup` passa por
+ * aqui — só `/setup` fica de fora do portão.
  */
 function Gate(props: { children?: any }) {
   const list = useSources();
@@ -29,16 +30,22 @@ function Gate(props: { children?: any }) {
   );
 }
 
+/** A barra de navegação some durante o onboarding: nada em `/setup` deveria levar a rotas com catálogo vazio. */
+function Shell(props: { children?: any }) {
+  const location = useLocation();
+  return (
+    <>
+      <Show when={location.pathname !== "/setup"}>
+        <Nav />
+      </Show>
+      <Suspense>{props.children}</Suspense>
+    </>
+  );
+}
+
 export default function App() {
   return (
-    <Router
-      root={props => (
-        <>
-          <Nav />
-          <Suspense>{props.children}</Suspense>
-        </>
-      )}
-    >
+    <Router root={Shell}>
       <Route path="/setup" component={Setup} />
       <Route
         path="/"
@@ -48,13 +55,62 @@ export default function App() {
           </Gate>
         )}
       />
-      <Route path="/filmes" component={Filmes} />
-      <Route path="/series" component={Series} />
-      <Route path="/biblioteca" component={Biblioteca} />
-      <Route path="/canais" component={Channels} />
-      <Route path="/filme/:id" component={Filme} />
-      <Route path="/serie/:id" component={Serie} />
-      <Route path="/watch/:id" component={Watch} />
+      <Route
+        path="/filmes"
+        component={() => (
+          <Gate>
+            <Filmes />
+          </Gate>
+        )}
+      />
+      <Route
+        path="/series"
+        component={() => (
+          <Gate>
+            <Series />
+          </Gate>
+        )}
+      />
+      <Route
+        path="/biblioteca"
+        component={() => (
+          <Gate>
+            <Biblioteca />
+          </Gate>
+        )}
+      />
+      <Route
+        path="/canais"
+        component={() => (
+          <Gate>
+            <Channels />
+          </Gate>
+        )}
+      />
+      <Route
+        path="/filme/:id"
+        component={() => (
+          <Gate>
+            <Filme />
+          </Gate>
+        )}
+      />
+      <Route
+        path="/serie/:id"
+        component={() => (
+          <Gate>
+            <Serie />
+          </Gate>
+        )}
+      />
+      <Route
+        path="/watch/:id"
+        component={() => (
+          <Gate>
+            <Watch />
+          </Gate>
+        )}
+      />
       <Route path="*" component={NotFound} />
     </Router>
   );
