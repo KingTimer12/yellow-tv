@@ -15,16 +15,19 @@ function normalize(value: string) {
 }
 
 async function load(): Promise<Channel[]> {
-  // Uma página grande basta: nenhuma lista real passa de alguns milhares de canais.
+  // O backend já usa uma página gigante para canais (CHANNEL_PAGE_SIZE), então
+  // uma única chamada cobre qualquer lista real sem repetir o agregado por
+  // `group_name`. Se algum dia uma lista extrapolar isso, pagina sequencialmente
+  // (nunca em paralelo — cada página roda um GROUP BY completo por trás do mutex).
   const first = await fetchCatalog({ kind: "canais", query: "", group: "", page: 0 });
-  const pages = Math.ceil(first.total / first.pageSize);
-  const rest = await Promise.all(
-    Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
-      fetchCatalog({ kind: "canais", query: "", group: "", page: index + 1 }),
-    ),
-  );
-  return [first, ...rest]
-    .flatMap(page => page.items)
+  const items = [first.items];
+  let page = first;
+  while ((page.page + 1) * page.pageSize < page.total) {
+    page = await fetchCatalog({ kind: "canais", query: "", group: "", page: page.page + 1 });
+    items.push(page.items);
+  }
+  return items
+    .flat()
     .sort((a, b) => (a.channelNumber ?? 9999) - (b.channelNumber ?? 9999))
     .map(item => ({ ...item, search: normalize(item.title) }));
 }
