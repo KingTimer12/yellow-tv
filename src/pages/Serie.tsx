@@ -1,24 +1,37 @@
 import { A, useParams } from "@solidjs/router";
 import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
 import Player from "~/components/Player";
+import SourcePicker from "~/components/SourcePicker";
 import TitleHero from "~/components/TitleHero";
-import { Play } from "~/components/Icons";
-import { fetchEpisodes, fetchItem, fetchMeta, shortGroup, type Episode, type Series } from "~/lib/vod";
+import { Check, Play } from "~/components/Icons";
+import {
+  fetchEpisodes,
+  fetchItem,
+  fetchMeta,
+  fetchNextEpisode,
+  markWatched,
+  type EpisodeRow,
+} from "~/lib/api";
+import { shortGroup } from "~/lib/vod";
 
 export default function SeriePage() {
   const params = useParams<{ id: string }>();
   const [started, setStarted] = createSignal(false);
   const [season, setSeason] = createSignal<number>();
-  const [current, setCurrent] = createSignal<Episode>();
+  const [current, setCurrent] = createSignal<EpisodeRow>();
+  const [source, setSource] = createSignal(0);
   onMount(() => setStarted(true));
 
   const [data] = createResource(
     () => (started() ? params.id : undefined),
     id => fetchItem("series", id),
   );
-  const [detail] = createResource(() => (started() ? params.id : undefined), fetchEpisodes);
+  const [detail, { refetch: refetchEpisodes }] = createResource(
+    () => (started() ? params.id : undefined),
+    fetchEpisodes,
+  );
 
-  const series = () => data()?.item as Series | undefined;
+  const series = () => data()?.item;
 
   const [meta] = createResource(
     () => {
@@ -28,16 +41,34 @@ export default function SeriePage() {
     fetchMeta,
   );
 
-  const seasons = createMemo(() => {
-    const episodes = detail()?.episodes ?? [];
-    return [...new Set(episodes.map(episode => episode.season))].sort((a, b) => a - b);
-  });
-
+  const seasons = createMemo(() => [
+    ...new Set((detail()?.episodes ?? []).map(episode => episode.season)),
+  ]);
   const activeSeason = () => season() ?? seasons()[0];
-
   const episodes = createMemo(() =>
     (detail()?.episodes ?? []).filter(episode => episode.season === activeSeason()),
   );
+
+  /** O botão primário aponta para o primeiro episódio não concluído. */
+  const upNext = createMemo(() => (detail()?.episodes ?? []).find(episode => !episode.completed));
+
+  const play = (episode: EpisodeRow) => {
+    setSource(0);
+    setCurrent(episode);
+  };
+
+  const advance = async () => {
+    const show = series();
+    if (!show) return;
+    await refetchEpisodes();
+    const next = await fetchNextEpisode(show.id);
+    if (!next) return setCurrent(undefined);
+    const row = (detail()?.episodes ?? []).find(episode => episode.id === next.id);
+    if (row) {
+      setSeason(row.season);
+      play(row);
+    }
+  };
 
   return (
     <main class="relative z-10">
@@ -46,8 +77,11 @@ export default function SeriePage() {
         fallback={
           <div class="mx-auto max-w-md px-4 py-24 text-center">
             <p class="font-mono text-sm text-paper/40">
-              <Show when={data.error} fallback={<>carregando série<span class="anim-caret">_</span></>}>
-                {(data.error as Error).message}
+              <Show
+                when={data.error}
+                fallback={<>carregando série<span class="anim-caret">_</span></>}
+              >
+                {String(data.error)}
               </Show>
             </p>
             <Show when={data.error}>
@@ -63,21 +97,28 @@ export default function SeriePage() {
             <Show when={current()}>
               {episode => (
                 <div class="anim-reveal mx-auto max-w-6xl px-4 pt-4">
-                  <Player
-                    src={episode().url}
-                    title={`${show().title} T${episode().season} E${episode().episode}`}
-                    poster={show().logo}
-                  />
+                  <Show when={episode().streams[source()]}>
+                    {stream => (
+                      <Player
+                        src={stream().url}
+                        title={`${show().title} T${episode().season} E${episode().episode}`}
+                        poster={show().logo ?? undefined}
+                        owner={{ id: episode().id, kind: "episode" }}
+                        onEnded={advance}
+                      />
+                    )}
+                  </Show>
                   <p class="mt-2 font-mono text-xs text-amber">
                     T{episode().season} · E{episode().episode}
                   </p>
+                  <SourcePicker streams={episode().streams} active={source()} onPick={setSource} />
                 </div>
               )}
             </Show>
 
             <TitleHero
               title={show().title}
-              poster={show().logo}
+              poster={show().logo ?? ""}
               subtitle={shortGroup(show().group)}
               meta={meta()}
               metaPending={meta.loading}
@@ -85,17 +126,26 @@ export default function SeriePage() {
               <div class="mt-6 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setCurrent(detail()?.episodes[0])}
-                  disabled={!detail()}
-                  class="press flex items-center gap-2 rounded-sm bg-amber px-5 py-3 font-medium text-ink hover:bg-paper hover:shadow-[var(--shadow-glow)] disabled:opacity-40 disabled:hover:bg-amber disabled:hover:shadow-none"
+                  onClick={() => {
+                    const next = upNext();
+                    if (!next) return;
+                    setSeason(next.season);
+                    play(next);
+                  }}
+                  disabled={!upNext() || !detail()}
+                  class="press flex items-center gap-2 rounded-sm bg-amber px-5 py-3 font-medium text-ink hover:bg-paper hover:shadow-[var(--shadow-glow)] disabled:opacity-40"
                 >
                   <Play size={16} />
-                  Assistir do começo
+                  <Show when={upNext()} fallback={<>Série concluída</>}>
+                    {next =>
+                      next().percent > 0
+                        ? `Retomar T${next().season} E${next().episode}`
+                        : `Assistir T${next().season} E${next().episode}`
+                    }
+                  </Show>
                 </button>
                 <span class="text-sm text-paper/45">
-                  {`${show().seasons.length} ${
-                    show().seasons.length > 1 ? "temporadas" : "temporada"
-                  } · ${show().episodeCount} episódios`}
+                  {`${show().seasons} ${show().seasons > 1 ? "temporadas" : "temporada"} · ${show().episodeCount} episódios`}
                 </span>
               </div>
             </TitleHero>
@@ -110,67 +160,77 @@ export default function SeriePage() {
                 }
               >
                 <Show when={seasons().length > 1}>
-                  <div
-                    role="tablist"
-                    aria-label="Temporadas"
-                    class="mb-6 flex gap-1 overflow-x-auto border-b border-edge"
-                  >
+                  <ul class="mb-4 flex flex-wrap gap-2">
                     <For each={seasons()}>
-                      {number => (
-                        <button
-                          type="button"
-                          role="tab"
-                          aria-selected={activeSeason() === number}
-                          onClick={() => setSeason(number)}
-                          class="press -mb-px shrink-0 border-b-2 px-4 py-2.5 text-sm"
-                          classList={{
-                            "border-amber text-amber": activeSeason() === number,
-                            "border-transparent text-paper/50 hover:text-paper":
-                              activeSeason() !== number,
-                          }}
-                        >
-                          Temporada {number}
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </Show>
-
-                <ul role="tabpanel">
-                  <For each={episodes()}>
-                    {(episode, index) => {
-                      const active = () =>
-                        current()?.url === episode.url;
-                      return (
-                        <li class="anim-fade" style={{ "--i": Math.min(index(), 16) }}>
+                      {value => (
+                        <li>
                           <button
                             type="button"
-                            onClick={() => setCurrent(episode)}
-                            class="press rail flex w-full items-center gap-4 border-b border-edge/60 py-3 pl-3.5 pr-2 text-left hover:bg-panel/80"
-                            classList={{ "bg-amber/10": active() }}
-                            data-current={String(active())}
+                            onClick={() => setSeason(value)}
+                            class="press rounded-full border border-edge bg-panel/50 px-3 py-1 text-sm text-paper/60 hover:border-amber-deep hover:text-amber"
+                            classList={{
+                              "border-amber bg-amber/12 text-amber": activeSeason() === value,
+                            }}
                           >
-                            <span
-                              class="w-12 shrink-0 border-r border-edge pr-3 text-right font-mono text-sm tabular-nums text-amber-deep"
-                              classList={{ "text-amber": active() }}
-                            >
-                              {String(episode.episode).padStart(2, "0")}
-                            </span>
-                            <span class="min-w-0 flex-1 truncate text-sm text-paper/90">
-                              Episódio {episode.episode}
-                            </span>
-                            <span
-                              class="shrink-0 font-mono text-xs text-paper/30"
-                              classList={{ "text-amber": active() }}
-                            >
-                              {active() ? "tocando" : "assistir"}
-                            </span>
+                            T{value}
                           </button>
                         </li>
-                      );
-                    }}
-                  </For>
-                </ul>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
+
+                <Show
+                  when={episodes().length}
+                  fallback={
+                    <p class="font-mono text-sm text-paper/40">nenhum episódio nesta temporada</p>
+                  }
+                >
+                  <ul class="divide-y divide-edge/70">
+                    <For each={episodes()}>
+                      {episode => (
+                        <li class="flex items-center gap-3 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => play(episode)}
+                            disabled={!episode.streams.length}
+                            class="press flex min-w-0 flex-1 items-center gap-3 text-left disabled:opacity-40"
+                          >
+                            <span class="w-14 shrink-0 font-mono text-xs tabular-nums text-paper/40">
+                              T{episode.season}E{episode.episode}
+                            </span>
+                            <span class="min-w-0 flex-1">
+                              <span class="block truncate text-sm text-paper/85">
+                                {episode.title ?? `Episódio ${episode.episode}`}
+                              </span>
+                              <Show when={episode.percent > 0 && !episode.completed}>
+                                <span class="mt-1 block h-[3px] w-32 bg-ink/70">
+                                  <span
+                                    class="block h-full bg-amber"
+                                    style={{ width: `${Math.round(episode.percent * 100)}%` }}
+                                  />
+                                </span>
+                              </Show>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await markWatched(episode.id, "episode", !episode.completed);
+                              await refetchEpisodes();
+                            }}
+                            class="press shrink-0 rounded-sm border border-edge p-2 text-paper/45 hover:border-amber hover:text-amber"
+                            classList={{ "border-amber/60 text-amber": episode.completed }}
+                            aria-pressed={episode.completed}
+                            title={episode.completed ? "Marcar como não visto" : "Marcar como visto"}
+                          >
+                            <Check size={14} />
+                          </button>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
               </Show>
             </section>
           </>

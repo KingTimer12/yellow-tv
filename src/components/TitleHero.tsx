@@ -1,5 +1,5 @@
 import { For, Show, type JSX } from "solid-js";
-import type { Meta } from "~/lib/vod";
+import type { Meta } from "~/lib/api";
 
 type TitleHeroProps = {
   title: string;
