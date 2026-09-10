@@ -8,6 +8,7 @@ import {
   onCleanup,
   onMount,
   Show,
+  untrack,
 } from "solid-js";
 import PosterGrid from "~/components/PosterGrid";
 import PosterSkeleton from "~/components/PosterSkeleton";
@@ -54,7 +55,10 @@ export default function CatalogBrowser(props: CatalogBrowserProps) {
   // (só entra em ação quando a URL já refletir esse valor).
   createEffect(() => {
     const q = query();
-    if (q !== inputValue()) setInputValue(q);
+    // `inputValue` fica fora do rastreio: se virasse dependência, cada tecla
+    // digitada reexecutaria o efeito e devolveria o campo ao valor antigo da
+    // URL (que só muda depois do debounce), zerando a busca a cada caractere.
+    if (q !== untrack(inputValue)) setInputValue(q);
   });
   const group = () => params.g ?? "";
   const page = () => Number(params.p ?? 0);
