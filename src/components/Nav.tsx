@@ -1,11 +1,13 @@
 import { A, useLocation } from "@solidjs/router";
 import { For } from "solid-js";
-import { Film, Signal, Stack, StarOutline, Tv } from "./Icons";
+import { Film, Library, Play, Signal, Stack, Tv } from "./Icons";
 
 const LINKS = [
-  { href: "/", label: "Canais", icon: Tv, exact: true },
+  { href: "/", label: "Início", icon: Play, exact: true },
   { href: "/filmes", label: "Filmes", icon: Film, exact: false },
   { href: "/series", label: "Séries", icon: Stack, exact: false },
+  { href: "/biblioteca", label: "Biblioteca", icon: Library, exact: false },
+  { href: "/canais", label: "Canais", icon: Tv, exact: false },
 ] as const;
 
 export default function Nav() {
@@ -42,13 +44,6 @@ export default function Nav() {
               </A>
             )}
           </For>
-          <A
-            href="/?g=favoritos"
-            class="press hidden items-center gap-2 rounded-sm px-3 py-1.5 text-paper/50 hover:bg-panel/60 hover:text-amber sm:flex"
-          >
-            <StarOutline size={16} />
-            <span>Favoritos</span>
-          </A>
         </nav>
       </div>
     </header>

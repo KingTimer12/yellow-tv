@@ -81,3 +81,11 @@ export const Signal = (props: IconProps) =>
       <path d="M4 20V13M9 20V9M14 20V5M19 20v-9" />
     </>,
   );
+
+export const Library = (props: IconProps) =>
+  base(
+    props,
+    <>
+      <path d="M3 4h4v16H3zM9 4h4v16H9zM16 5l4 14" />
+    </>,
+  );
