@@ -151,7 +151,7 @@ export default function Setup() {
 
       <Show when={busy()}>
         <p class="anim-fade mt-4 font-mono text-xs tabular-nums text-amber" aria-live="polite">
-          {parsed().toLocaleString("pt-BR")} entradas lidas<span class="anim-caret">_</span>
+          {parsed().toLocaleString("pt-BR")} linhas lidas<span class="anim-caret">_</span>
         </p>
       </Show>
 
@@ -172,9 +172,17 @@ export default function Setup() {
         {result => (
           <div class="anim-fade mt-4 rounded-sm border border-edge bg-panel/60 p-4">
             <p class="text-sm text-paper/85">
-              {result().movies.toLocaleString("pt-BR")} filmes ·{" "}
+              {(result().movies + result().series + result().channels).toLocaleString("pt-BR")}{" "}
+              títulos: {result().movies.toLocaleString("pt-BR")} filmes ·{" "}
               {result().series.toLocaleString("pt-BR")} séries ·{" "}
               {result().channels.toLocaleString("pt-BR")} canais
+            </p>
+            {/* A lista tem muito mais linhas que títulos: cada episódio é uma
+                linha e todos caem na mesma série. Sem dizer isso, o contador
+                que correu até 260 mil parece não ter nada a ver com o total. */}
+            <p class="mt-1 font-mono text-xs text-paper/40">
+              de {result().parsed.toLocaleString("pt-BR")} linhas da lista — episódios da mesma
+              série contam como um título
             </p>
             <Show when={result().discarded}>
               <p class="mt-1 font-mono text-xs text-paper/40">
@@ -195,7 +203,8 @@ export default function Setup() {
                   <div class="min-w-0">
                     <p class="truncate text-sm text-paper/90">{source.label}</p>
                     <p class="truncate font-mono text-[0.7rem] text-paper/35">
-                      {source.itemCount.toLocaleString("pt-BR")} títulos · {source.url}
+                      {source.itemCount.toLocaleString("pt-BR")} títulos (filmes e séries) ·{" "}
+                      {source.url}
                     </p>
                   </div>
                   <button

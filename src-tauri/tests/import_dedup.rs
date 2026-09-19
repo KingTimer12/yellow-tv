@@ -302,3 +302,40 @@ fn progresso_e_emitido_durante_o_parse() {
     assert_eq!(marcos[0], 500, "o primeiro marco é parcial, não o total");
     assert_eq!(marcos.last().copied(), Some(1200));
 }
+
+// O relatório precisa falar numa unidade só. Antes, `series` contava séries
+// distintas enquanto `movies` contava linhas do arquivo, então os números não
+// somavam e diziam coisas diferentes com a mesma cara.
+#[test]
+fn relatorio_conta_titulos_distintos_e_soma_o_total_da_fonte() {
+    let mut conn = db::open_memory().unwrap();
+    let source = import::upsert_source(&conn, "http://lista", "Lista", "url").unwrap();
+
+    // 6 linhas: 4 episódios de uma série só, e 2 do mesmo filme (duas versões).
+    let lista = concat!(
+        "#EXTINF:-1 group-title=\"Series | Netflix\",Origem S01 E01\nhttp://host/1\n",
+        "#EXTINF:-1 group-title=\"Series | Netflix\",Origem S01 E02\nhttp://host/2\n",
+        "#EXTINF:-1 group-title=\"Series | Legendadas\",Origem [L] S01 E01\nhttp://host/3\n",
+        "#EXTINF:-1 group-title=\"Series | Legendadas\",Origem [L] S01 E02\nhttp://host/4\n",
+        "#EXTINF:-1 group-title=\"Filmes | Acao\",Duna (2021)\nhttp://host/5\n",
+        "#EXTINF:-1 group-title=\"Filmes | Legendados\",Duna [L] (2021)\nhttp://host/6\n",
+    );
+
+    let report = import::ingest(
+        &mut conn,
+        source.id,
+        std::io::Cursor::new(lista.to_owned()),
+        &mut |_| {},
+    )
+    .unwrap();
+
+    assert_eq!(report.parsed, 6, "seis linhas lidas");
+    assert_eq!(report.series, 1, "uma série, não quatro episódios");
+    assert_eq!(report.movies, 1, "um filme, não duas versões");
+    assert_eq!(report.channels, 0);
+    // O total da fonte é a soma das três, na mesma unidade.
+    assert_eq!(
+        report.source.item_count,
+        (report.movies + report.series + report.channels) as i64
+    );
+}

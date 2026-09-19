@@ -4,7 +4,6 @@
 //! usam `ON CONFLICT` porque a mesma obra aparece em listas diferentes — é assim
 //! que o dedup sai de graça.
 
-use std::collections::HashSet;
 use std::io::BufRead;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -173,9 +172,6 @@ pub fn ingest<R: BufRead>(
         .execute("DELETE FROM streams WHERE source_id = ?1", [source_id])
         .map_err(stringify)?;
 
-    let mut movie_count = 0usize;
-    let mut series_ids: HashSet<String> = HashSet::new();
-    let mut channels = 0usize;
     let mut failure: Option<String> = None;
 
     let outcome = {
@@ -261,13 +257,7 @@ pub fn ingest<R: BufRead>(
                 });
 
             match result {
-                Ok(_) => match entry.kind {
-                    EntryKind::Movie => movie_count += 1,
-                    EntryKind::Series => {
-                        series_ids.insert(item_id);
-                    }
-                    EntryKind::Channel => channels += 1,
-                },
+                Ok(_) => {}
                 Err(error) => failure = Some(stringify(error)),
             }
         });
@@ -289,18 +279,40 @@ pub fn ingest<R: BufRead>(
     // Marco final: fecha a contagem no total real de entradas reconhecidas.
     progress(outcome.parsed);
 
-    // Streams de episódio contam pela série dona, não por episódio: o que
-    // importa aqui é quantos títulos distintos a lista trouxe.
-    let distinct: i64 = transaction
-        .query_row(
-            "SELECT count(DISTINCT COALESCE(e.series_id, s.owner_id))
+    // Tudo contado pela mesma régua: títulos distintos, não linhas do arquivo.
+    // Misturar as duas unidades no mesmo relatório ("17.714 filmes · 8.870
+    // séries") mostra números que não somam e não querem dizer a mesma coisa.
+    // Streams de episódio contam pela série dona.
+    let mut by_kind = transaction
+        .prepare(
+            "SELECT i.kind, count(DISTINCT i.id)
              FROM streams s
              LEFT JOIN episodes e ON s.owner_kind = 'episode' AND e.id = s.owner_id
-             WHERE s.source_id = ?1",
-            [source_id],
-            |row| row.get(0),
+             JOIN items i ON i.id = COALESCE(e.series_id, s.owner_id)
+             WHERE s.source_id = ?1
+             GROUP BY i.kind",
         )
         .map_err(stringify)?;
+    let mut movie_count = 0usize;
+    let mut series_count = 0usize;
+    let mut channels = 0usize;
+    let counted = by_kind
+        .query_map([source_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
+        })
+        .map_err(stringify)?;
+    for row in counted {
+        let (kind, count) = row.map_err(stringify)?;
+        match kind.as_str() {
+            "movie" => movie_count = count,
+            "series" => series_count = count,
+            "channel" => channels = count,
+            _ => {}
+        }
+    }
+    drop(by_kind);
+    let distinct = (movie_count + series_count + channels) as i64;
+
     transaction
         .execute(
             "UPDATE sources SET last_sync_at = ?1, item_count = ?2 WHERE id = ?3",
@@ -320,7 +332,7 @@ pub fn ingest<R: BufRead>(
         parsed: outcome.parsed,
         discarded: outcome.discarded,
         movies: movie_count,
-        series: series_ids.len(),
+        series: series_count,
         channels,
     })
 }
