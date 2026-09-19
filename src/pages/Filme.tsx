@@ -2,7 +2,6 @@ import { A, useParams } from "@solidjs/router";
 import { createResource, createSignal, onMount, Show } from "solid-js";
 import Player from "~/components/Player";
 import PosterGrid from "~/components/PosterGrid";
-import SourcePicker from "~/components/SourcePicker";
 import TitleHero from "~/components/TitleHero";
 import { Check, Play, StarOutline } from "~/components/Icons";
 import { fetchFavorites, fetchItem, fetchMeta, markWatched, toggleFavorite } from "~/lib/api";
@@ -84,6 +83,9 @@ export default function FilmePage() {
                     poster={current().logo ?? undefined}
                     owner={{ id: current().id, kind: "item" }}
                     startAt={resumeAt()}
+                    streams={streams()}
+                    activeStream={source()}
+                    onPickStream={setSource}
                     onEnded={() => void refetch()}
                   />
                 </div>
@@ -137,7 +139,6 @@ export default function FilmePage() {
                 </A>
               </div>
 
-              <SourcePicker streams={streams()} active={source()} onPick={setSource} />
             </TitleHero>
 
             <Show when={data()?.related.length}>

@@ -56,6 +56,14 @@ export type StreamRef = {
   quality: string | null;
   sourceLabel: string;
   channelNumber: number | null;
+  /** "Dublado"/"Legendado" quando a lista marca; `null` quando não dá para saber. */
+  variant: string | null;
+};
+
+export type Subtitle = {
+  label: string;
+  /** Já em WebVTT: o `<track>` do HTML não aceita SRT. */
+  content: string;
 };
 
 export type Progress = {
@@ -148,6 +156,14 @@ export const addSource = (urlOrPath: string, kind: "url" | "file", label?: strin
 export const syncSource = (id: number) => invoke<ImportReport>("sync_source", { id });
 
 export const removeSource = (id: number) => invoke<void>("remove_source", { id });
+
+/**
+ * Abre o seletor de arquivo e devolve a legenda em WebVTT, ou `null` se a
+ * pessoa cancelar. O caminho nunca sai daqui: quem escolhe o arquivo é o Rust,
+ * porque um comando que lê o caminho que o front mandar seria leitura
+ * arbitrária de disco.
+ */
+export const pickSubtitle = () => invoke<Subtitle | null>("pick_subtitle");
 
 export function fetchCatalog(input: {
   kind: CatalogKind;

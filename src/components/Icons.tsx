@@ -101,3 +101,75 @@ export const Sliders = (props: IconProps) =>
       <circle cx="10" cy="17" r="2" />
     </>,
   );
+
+export const Pause = (props: IconProps) =>
+  base(props, <path d="M8 5v14M16 5v14" />);
+
+export const Volume = (props: IconProps) =>
+  base(
+    props,
+    <>
+      <path d="M4 9v6h4l5 4V5L8 9z" />
+      <path d="M17 9.5a3.5 3.5 0 010 5M19.5 7a7 7 0 010 10" />
+    </>,
+  );
+
+export const VolumeOff = (props: IconProps) =>
+  base(
+    props,
+    <>
+      <path d="M4 9v6h4l5 4V5L8 9z" />
+      <path d="M17 10l4 4M21 10l-4 4" />
+    </>,
+  );
+
+export const Fullscreen = (props: IconProps) =>
+  base(props, <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />);
+
+export const FullscreenExit = (props: IconProps) =>
+  base(props, <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />);
+
+export const Pip = (props: IconProps) =>
+  base(
+    props,
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <rect x="12" y="11" width="7" height="6" rx="1" />
+    </>,
+  );
+
+export const Subtitles = (props: IconProps) =>
+  base(
+    props,
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M7 14h4M14 14h3" />
+    </>,
+  );
+
+export const Gauge = (props: IconProps) =>
+  base(
+    props,
+    <>
+      <path d="M4 16a8 8 0 1116 0" />
+      <path d="M12 16l4-4" />
+    </>,
+  );
+
+export const Back10 = (props: IconProps) =>
+  base(
+    props,
+    <>
+      <path d="M11 5L6 9l5 4" />
+      <path d="M6 9h7a5 5 0 110 10H9" />
+    </>,
+  );
+
+export const Forward10 = (props: IconProps) =>
+  base(
+    props,
+    <>
+      <path d="M13 5l5 4-5 4" />
+      <path d="M18 9h-7a5 5 0 100 10h4" />
+    </>,
+  );

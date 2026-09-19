@@ -1,7 +1,6 @@
 import { A, useParams } from "@solidjs/router";
 import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
 import Player from "~/components/Player";
-import SourcePicker from "~/components/SourcePicker";
 import TitleHero from "~/components/TitleHero";
 import { Check, Play } from "~/components/Icons";
 import {
@@ -45,6 +44,17 @@ export default function SeriePage() {
     ...new Set((detail()?.episodes ?? []).map(episode => episode.season)),
   ]);
   const activeSeason = () => season() ?? seasons()[0];
+
+  // Rótulo do próximo episódio na ordem da série. Só existe quando há um
+  // próximo: é ele que liga a contagem regressiva no fim do episódio.
+  const nextLabel = () => {
+    const playing = current();
+    if (!playing) return undefined;
+    const all = detail()?.episodes ?? [];
+    const index = all.findIndex(episode => episode.id === playing.id);
+    const next = index >= 0 ? all[index + 1] : undefined;
+    return next ? `T${next.season} · E${next.episode}` : undefined;
+  };
   const episodes = createMemo(() =>
     (detail()?.episodes ?? []).filter(episode => episode.season === activeSeason()),
   );
@@ -105,14 +115,17 @@ export default function SeriePage() {
                         poster={show().logo ?? undefined}
                         owner={{ id: episode().id, kind: "episode" }}
                         startAt={episode().completed ? 0 : episode().positionSecs}
-                        onEnded={advance}
+                        streams={episode().streams}
+                        activeStream={source()}
+                        onPickStream={setSource}
+                        nextLabel={nextLabel()}
+                        onNext={advance}
                       />
                     )}
                   </Show>
                   <p class="mt-2 font-mono text-xs text-amber">
                     T{episode().season} · E{episode().episode}
                   </p>
-                  <SourcePicker streams={episode().streams} active={source()} onPick={setSource} />
                 </div>
               )}
             </Show>

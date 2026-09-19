@@ -39,7 +39,14 @@ impl AppState {
     }
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Subtitle {
+    label: String,
+    content: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ImportProgress {
     source_id: i64,
@@ -208,12 +215,40 @@ fn default_label(url_or_path: &str) -> String {
         .to_owned()
 }
 
-/// Lê a legenda do disco e devolve WebVTT. A conversão fica no Rust de
-/// propósito: decodificação de Latin-1 e reescrita de carimbos de tempo são
-/// trabalho de texto que não tem por que rodar na thread da interface.
-#[tauri::command]
-fn load_subtitle(path: String) -> Result<String, String> {
-    subtitles::load(std::path::Path::new(&path))
+/// Abre o seletor de arquivo e devolve a legenda já em WebVTT.
+///
+/// O caminho é escolhido aqui, no Rust, e nunca chega vindo da WebView: um
+/// comando que lê o arquivo que o front mandar é leitura arbitrária de disco, e
+/// esta WebView carrega conteúdo de terceiros (pôsteres e streams das listas).
+/// Com o diálogo deste lado, o único arquivo legível é o que a pessoa apontou.
+///
+/// A conversão também fica no Rust de propósito: decodificar Latin-1 e
+/// reescrever carimbos de tempo é trabalho de texto que não tem por que rodar
+/// na thread da interface.
+#[tauri::command(async)]
+fn pick_subtitle(app: AppHandle) -> Result<Option<Subtitle>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("Legenda", &["srt", "vtt"])
+        .blocking_pick_file();
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|error| format!("caminho de legenda inválido: {error}"))?;
+    let label = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Legenda")
+        .to_owned();
+    Ok(Some(Subtitle {
+        label,
+        content: subtitles::load(&path)?,
+    }))
 }
 
 #[tauri::command]
@@ -401,7 +436,7 @@ pub fn run() {
             list_sources,
             add_source,
             sync_source,
-            load_subtitle,
+            pick_subtitle,
             remove_source,
             catalog_page,
             catalog_item,
